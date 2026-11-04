@@ -18,8 +18,16 @@ const history = [];
 const clients = new Set();
 const rateLog = new Map();
 
-const chromebookHtml = fs.readFileSync(path.join(__dirname, 'chromebook.html'));
-const chatHtml = fs.readFileSync(path.join(__dirname, 'chat.html'));
+function loadFile(name) {
+  try {
+    return fs.readFileSync(path.join(__dirname, name));
+  } catch (e) {
+    console.error('Missing file: ' + name + '. Files found in ' + __dirname + ': ' + fs.readdirSync(__dirname).join(', '));
+    return Buffer.from('<!DOCTYPE html><title>LocalChat</title><p>File ' + name + ' is missing on the server.</p>');
+  }
+}
+const chromebookHtml = loadFile('chromebook.html');
+const chatHtml = loadFile('chat.html');
 
 function safeWrite(res, data) {
   try {
@@ -76,6 +84,31 @@ function handleEvents(req, res) {
   res.on('close', cleanup);
 }
 
+function handleDelete(req, res) {
+  let body = '';
+  req.on('error', () => {});
+  req.on('data', chunk => {
+    body += chunk;
+    if (body.length > MAX_BODY) req.destroy();
+  });
+  req.on('end', () => {
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch (e) {
+      return sendJson(res, 400, { ok: false, error: 'Bad request' });
+    }
+    const id = Number(data.id);
+    const sid = String(data.sid || '');
+    const idx = history.findIndex(m => m.id === id);
+    if (idx === -1) return sendJson(res, 404, { ok: false, error: 'Message not found' });
+    if (!sid || history[idx].sid !== sid) return sendJson(res, 403, { ok: false, error: 'You can only delete your own messages' });
+    history.splice(idx, 1);
+    broadcast('delete', { id: id });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
 function handleSend(req, res) {
   let body = '';
   let tooBig = false;
@@ -118,6 +151,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/chat') return sendHtml(res, chatHtml);
   if (req.method === 'GET' && url.pathname === '/events') return handleEvents(req, res);
   if (req.method === 'POST' && url.pathname === '/send') return handleSend(req, res);
+  if (req.method === 'POST' && url.pathname === '/delete') return handleDelete(req, res);
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
