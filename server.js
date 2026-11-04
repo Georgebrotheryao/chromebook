@@ -1,169 +1,105 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LocalChat</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
-body{display:flex;justify-content:center;padding:16px}
-.app{width:min(720px,100%);height:100%;display:flex;flex-direction:column;background:#0f1117;border:1px solid #232734;border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:popIn .3s cubic-bezier(.16,1,.3,1)}
-@keyframes popIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-header{display:flex;align-items:center;gap:12px;padding:14px 16px;background:#131722;border-bottom:1px solid #1f2330;flex-wrap:wrap}
-.title{display:flex;align-items:center;gap:8px;font-weight:600;margin-right:auto;font-size:15px}
-.logo{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#7c8cff,#3ddc97)}
-.online{font-size:12px;color:#8a93a8;white-space:nowrap}
-input.name{width:130px;height:30px;border-radius:15px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 10px;font:inherit;font-size:12px;outline:none}
-input.name:focus{border-color:#7c8cff}
-.status{display:flex;align-items:center;gap:6px;font-size:12px;color:#9aa3b8;white-space:nowrap}
-.dot{width:8px;height:8px;border-radius:50%;background:#5b6378}
-.status.busy .dot{background:#f5b942;animation:pulse 1.2s infinite}
-.status.ok .dot{background:#3ddc97;box-shadow:0 0 8px #3ddc97}
-.status.error .dot{background:#ff5d6c}
-@keyframes pulse{50%{opacity:.3}}
-.error{margin:10px 14px 0;padding:9px 12px;border-radius:10px;background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.35);color:#ff9aa4;font-size:13px}
-.error[hidden]{display:none}
-.messages{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
-.row{display:flex}
-.row.me{justify-content:flex-end}
-.bubble{max-width:78%;padding:8px 12px;border-radius:16px;background:#1c2130;animation:bubbleIn .25s cubic-bezier(.16,1,.3,1)}
-@keyframes bubbleIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.row.me .bubble{background:linear-gradient(135deg,#6f7fff,#5366ef);color:#fff;border-bottom-right-radius:5px}
-.row.other .bubble{border-bottom-left-radius:5px}
-.meta{font-size:11px;opacity:.7;margin-bottom:2px}
-.text{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
-.composer{display:flex;gap:8px;align-items:flex-end;padding:10px 12px;border-top:1px solid #1f2330;background:#131722}
-textarea{flex:1;resize:none;max-height:140px;min-height:40px;border-radius:20px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:10px 14px;font:inherit;font-size:14px;outline:none;line-height:1.4}
-textarea:focus{border-color:#7c8cff}
-button{height:40px;padding:0 18px;border-radius:20px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s}
-button:hover{background:#262c3d}
-button:active{transform:scale(.96)}
-button.primary{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
-button.ghost{background:transparent}
-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px 12px;background:#131722;font-size:12px;color:#8a93a8}
-@media (max-width:600px){.bubble{max-width:88%}.title{width:100%}}
-</style>
-</head>
-<body>
-<div class="app">
-  <header>
-    <div class="title"><span class="logo"></span>LocalChat</div>
-    <span class="online" id="online">Connecting…</span>
-    <input class="name" id="name" maxlength="24" placeholder="Your name" aria-label="Your name">
-    <div class="status busy" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
-  </header>
-  <div class="error" id="error" hidden></div>
-  <div class="messages" id="messages"></div>
-  <div class="composer">
-    <textarea id="input" rows="1" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea>
-    <button class="primary" id="send">Send</button>
-  </div>
-  <footer>
-    <button class="ghost" id="clear">Clear view</button>
-    <span>Everyone on this site sees these messages.</span>
-  </footer>
-</div>
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
-<script>
-const $ = s => document.querySelector(s);
-const SID = Math.random().toString(36).slice(2) + Date.now().toString(36);
-const seen = new Set();
-const nameInput = $('#name');
+const PORT = process.env.PORT || 3000;
+const HISTORY_LIMIT = 200;
+const MAX_TEXT = 1000;
+const MAX_BODY = 8 * 1024;
+const RATE_WINDOW_MS = 5000;
+const RATE_MAX = 5;
 
-nameInput.value = localStorage.getItem('chat-name') || 'Guest';
-nameInput.addEventListener('change', () => {
-  nameInput.value = nameInput.value.trim().slice(0, 24) || 'Guest';
-  localStorage.setItem('chat-name', nameInput.value);
-});
+let nextId = 1;
+const history = [];
+const clients = new Set();
+const rateLog = new Map();
 
-function setStatus(kind, text) {
-  $('#status').className = 'status ' + kind;
-  $('#statusText').textContent = text;
-}
-function showError(msg) {
-  const e = $('#error');
-  e.textContent = msg;
-  e.hidden = !msg;
-}
-function setOnline(n) { $('#online').textContent = n + ' online'; }
-function fmtClock(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
-function scrollDown() { const m = $('#messages'); m.scrollTop = m.scrollHeight; }
+const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'));
 
-function addMessage(m) {
-  if (seen.has(m.id)) return;
-  seen.add(m.id);
-  const mine = m.sid === SID;
-  const row = document.createElement('div');
-  row.className = 'row ' + (mine ? 'me' : 'other');
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.textContent = (mine ? 'You' : m.name) + ' · ' + fmtClock(m.ts);
-  const text = document.createElement('div');
-  text.className = 'text';
-  text.textContent = m.text;
-  bubble.append(meta, text);
-  row.append(bubble);
-  $('#messages').append(row);
-  scrollDown();
+function broadcast(event, data) {
+  const payload = 'event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n';
+  clients.forEach(res => res.write(payload));
 }
 
-// EventSource reconnects by itself. On reconnect the server sends the recent history again,
-// and "seen" stops messages from showing twice.
-function connect() {
-  const es = new EventSource('/events');
-  es.addEventListener('hello', e => {
-    const d = JSON.parse(e.data);
-    setStatus('ok', 'Connected');
-    showError('');
-    setOnline(d.online);
-    d.history.forEach(addMessage);
+function sendJson(res, code, obj) {
+  res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const recent = (rateLog.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
+  const limited = recent.length >= RATE_MAX;
+  if (!limited) recent.push(now);
+  rateLog.set(ip, recent);
+  return limited;
+}
+
+function handleEvents(req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
   });
-  es.addEventListener('message', e => addMessage(JSON.parse(e.data)));
-  es.addEventListener('online', e => setOnline(JSON.parse(e.data).online));
-  es.onerror = () => setStatus('error', 'Reconnecting…');
+  res.write('event: hello\ndata: ' + JSON.stringify({ history: history, online: clients.size + 1 }) + '\n\n');
+  clients.add(res);
+  broadcast('online', { online: clients.size });
+
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(ping);
+    clients.delete(res);
+    broadcast('online', { online: clients.size });
+  });
 }
 
-function autosizeInput() {
-  const t = $('#input');
-  t.style.height = 'auto';
-  t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+function handleSend(req, res) {
+  let body = '';
+  let tooBig = false;
+  req.on('data', chunk => {
+    body += chunk;
+    if (body.length > MAX_BODY && !tooBig) {
+      tooBig = true;
+      sendJson(res, 413, { ok: false, error: 'Message too large' });
+      req.destroy();
+    }
+  });
+  req.on('end', () => {
+    if (tooBig) return;
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch (e) {
+      return sendJson(res, 400, { ok: false, error: 'Bad request' });
+    }
+    const name = String(data.name || '').trim().slice(0, 24) || 'Guest';
+    const text = String(data.text || '').trim();
+    const sid = String(data.sid || '').slice(0, 64);
+    if (!text) return sendJson(res, 400, { ok: false, error: 'Empty message' });
+    if (text.length > MAX_TEXT) return sendJson(res, 400, { ok: false, error: 'Message too long (max 1000 characters)' });
+    if (isRateLimited(req.socket.remoteAddress)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
+
+    const msg = { id: nextId++, ts: Date.now(), name: name, text: text, sid: sid };
+    history.push(msg);
+    if (history.length > HISTORY_LIMIT) history.shift();
+    broadcast('message', msg);
+    sendJson(res, 200, { ok: true, id: msg.id });
+  });
 }
 
-async function sendMessage() {
-  const input = $('#input');
-  const text = input.value.trim();
-  if (!text) return;
-  const name = nameInput.value.trim().slice(0, 24) || 'Guest';
-  input.value = '';
-  autosizeInput();
-  try {
-    const r = await fetch('/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, text: text, sid: SID })
-    });
-    const d = await r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
-    if (!d.ok) throw new Error(d.error || 'Could not send the message.');
-    showError('');
-  } catch (err) {
-    input.value = text;
-    autosizeInput();
-    showError(err instanceof TypeError ? 'Could not reach the server. Check your connection.' : err.message);
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(indexHtml);
   }
-}
-
-$('#send').addEventListener('click', sendMessage);
-$('#input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+  if (req.method === 'GET' && url.pathname === '/events') return handleEvents(req, res);
+  if (req.method === 'POST' && url.pathname === '/send') return handleSend(req, res);
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
 });
-$('#input').addEventListener('input', autosizeInput);
-$('#clear').addEventListener('click', () => { $('#messages').innerHTML = ''; });
 
-connect();
-$('#input').focus();
-</script>
-</body>
-</html>
+server.listen(PORT, () => {
+  console.log('LocalChat running on port ' + PORT);
+});
