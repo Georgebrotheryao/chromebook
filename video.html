@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video call</title>
+<style>
+[hidden]{display:none !important}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{height:100%;display:flex;flex-direction:column;min-height:0}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#131722;border-bottom:1px solid #1f2330}
+.title{font-weight:600;margin-right:auto}
+.count{font-size:12px;color:#8a93a8}
+.status{font-size:12px;color:#9aa3b8}
+.error{margin:10px 14px 0;padding:9px 12px;border-radius:10px;background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.35);color:#ff9aa4;font-size:13px;line-height:1.4}
+.lobby{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center}
+.lobby h2{font-size:18px}
+.lobby p{color:#8a93a8;font-size:13px;max-width:400px;line-height:1.5}
+input{height:40px;width:min(280px,90%);border-radius:20px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 14px;font:inherit;font-size:14px;outline:none}
+input:focus{border-color:#7c8cff}
+button{height:40px;padding:0 18px;border-radius:20px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s}
+button:hover{background:#262c3d}
+button:active{transform:scale(.96)}
+button.primary{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
+button.danger{background:#5b2630;border-color:#7a3340;color:#ffb4bd}
+button.off{background:#5b2630;border-color:#7a3340;color:#ffb4bd}
+.call{flex:1;min-height:0;display:flex;flex-direction:column}
+.grid{flex:1;min-height:0;overflow:auto;display:grid;gap:10px;padding:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));align-content:center}
+.tile{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3;border:1px solid #1f2330;animation:tileIn .35s cubic-bezier(.16,1,.3,1)}
+@keyframes tileIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.tile video{width:100%;height:100%;object-fit:cover;display:block}
+.tile.self video{transform:scaleX(-1)}
+.tile .avatar{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:44px;color:#7d869b;background:#111520}
+.tile.camoff .avatar{display:flex}
+.tile.camoff video{visibility:hidden}
+.label{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);padding:3px 9px;border-radius:10px;font-size:12px}
+.controls{display:flex;justify-content:center;gap:10px;padding:12px;background:#131722;border-top:1px solid #1f2330;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">Video call</div>
+    <div class="count" id="count"></div>
+    <div class="status" id="status"></div>
+  </header>
+  <div class="error" id="error" hidden></div>
+
+  <section class="lobby" id="lobby">
+    <h2>Join the video call</h2>
+    <p>Your camera and microphone only turn on after you press Join and allow access in the browser. Everyone in the call can see and hear you until you press Leave.</p>
+    <input id="name" maxlength="24" placeholder="Your name">
+    <button class="primary" id="join">Join with camera</button>
+  </section>
+
+  <section class="call" id="call" hidden>
+    <div class="grid" id="grid"></div>
+    <div class="controls">
+      <button id="toggleMic">Mute</button>
+      <button id="toggleCam">Camera off</button>
+      <button class="danger" id="leave">Leave</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const VID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+const ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+const peers = new Map();   // vid -> { pc, pending: [] }
+const names = new Map();   // vid -> name
+let stream = null;
+let joined = false;
+let micOn = true;
+let camOn = true;
+
+function showError(msg) {
+  const e = $('#error');
+  e.textContent = msg;
+  e.hidden = !msg;
+}
+function setStatus(t) { $('#status').textContent = t; }
+function updateCount() { $('#count').textContent = joined ? (1 + names.size) + ' in call' : ''; }
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
+}
+function sendSignal(to, kind, data) {
+  return post('/video/signal', { to: to, from: VID, kind: kind, data: data }).catch(() => {});
+}
+
+function addTile(id, name, s, self) {
+  if (document.getElementById('tile-' + id)) return;
+  const tile = document.createElement('div');
+  tile.className = 'tile' + (self ? ' self' : '');
+  tile.id = 'tile-' + id;
+  const v = document.createElement('video');
+  v.autoplay = true;
+  v.playsInline = true;
+  v.muted = self;
+  v.srcObject = s;
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = (name || '?').charAt(0).toUpperCase();
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = self ? 'You' : name;
+  tile.append(v, av, label);
+  $('#grid').append(tile);
+}
+function removeTile(id) {
+  const t = document.getElementById('tile-' + id);
+  if (t) t.remove();
+}
+
+function makePeer(id, name) {
+  const pc = new RTCPeerConnection({ iceServers: ICE });
+  const peer = { pc: pc, pending: [] };
+  peers.set(id, peer);
+  names.set(id, name);
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  pc.onicecandidate = e => { if (e.candidate) sendSignal(id, 'ice', e.candidate); };
+  pc.ontrack = e => {
+    const s = e.streams[0] || new MediaStream([e.track]);
+    const tile = document.getElementById('tile-' + id);
+    if (!tile) addTile(id, names.get(id) || 'Guest', s, false);
+    else tile.querySelector('video').srcObject = s;
+  };
+  updateCount();
+  return peer;
+}
+
+function removePeer(id) {
+  const p = peers.get(id);
+  if (p) { try { p.pc.close(); } catch (e) {} }
+  peers.delete(id);
+  names.delete(id);
+  removeTile(id);
+  updateCount();
+}
+
+// The person who joins makes the offers to everyone already in the call
+async function callPeer(id, name) {
+  const peer = makePeer(id, name);
+  const offer = await peer.pc.createOffer();
+  await peer.pc.setLocalDescription(offer);
+  sendSignal(id, 'offer', peer.pc.localDescription);
+}
+
+async function flushPending(peer) {
+  for (const c of peer.pending) await peer.pc.addIceCandidate(c).catch(() => {});
+  peer.pending = [];
+}
+
+async function onSignal(msg) {
+  if (!joined || msg.to !== VID) return;
+  const from = msg.from;
+  try {
+    if (msg.kind === 'offer') {
+      if (peers.has(from)) removePeer(from);
+      const peer = makePeer(from, names.get(from) || 'Guest');
+      await peer.pc.setRemoteDescription(msg.data);
+      await flushPending(peer);
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      sendSignal(from, 'answer', peer.pc.localDescription);
+    } else if (msg.kind === 'answer') {
+      const peer = peers.get(from);
+      if (!peer) return;
+      await peer.pc.setRemoteDescription(msg.data);
+      await flushPending(peer);
+    } else if (msg.kind === 'ice') {
+      const peer = peers.get(from);
+      if (!peer) return;
+      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(msg.data).catch(() => {});
+      else peer.pending.push(msg.data);
+    }
+  } catch (err) {
+    console.error('Signal error', err);
+  }
+}
+
+async function join() {
+  showError('');
+  const name = $('#name').value.trim().slice(0, 24) || 'Guest';
+  try { localStorage.setItem('chat-name', name); } catch (e) {}
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (err) {
+    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+      showError('Camera or microphone access was blocked. Allow it in the browser and try again.');
+    } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+      showError('No camera or microphone was found on this device.');
+    } else {
+      showError('Could not start the camera: ' + err.message);
+    }
+    return;
+  }
+  let r;
+  try {
+    r = await post('/video/join', { vid: VID, name: name });
+  } catch (err) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    showError('Could not reach the server. Check your connection.');
+    return;
+  }
+  if (!r.ok) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    showError(r.error || 'Could not join the call.');
+    return;
+  }
+  joined = true;
+  $('#lobby').hidden = true;
+  $('#call').hidden = false;
+  addTile(VID, name, stream, true);
+  setStatus('Connected');
+  r.peers.forEach(p => names.set(p.vid, p.name));
+  for (const p of r.peers) callPeer(p.vid, p.name);
+  updateCount();
+}
+
+async function leave() {
+  if (!joined) return;
+  joined = false;
+  try { await post('/video/leave', { vid: VID }); } catch (e) {}
+  peers.forEach((p, id) => { try { p.pc.close(); } catch (e) {} removeTile(id); });
+  peers.clear();
+  names.clear();
+  removeTile(VID);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  micOn = true;
+  camOn = true;
+  $('#toggleMic').textContent = 'Mute';
+  $('#toggleCam').textContent = 'Camera off';
+  $('#toggleMic').classList.remove('off');
+  $('#toggleCam').classList.remove('off');
+  $('#call').hidden = true;
+  $('#lobby').hidden = false;
+  setStatus('');
+  updateCount();
+}
+
+function toggleMic() {
+  if (!stream) return;
+  const t = stream.getAudioTracks()[0];
+  if (!t) return;
+  micOn = !micOn;
+  t.enabled = micOn;
+  $('#toggleMic').textContent = micOn ? 'Mute' : 'Unmute';
+  $('#toggleMic').classList.toggle('off', !micOn);
+}
+
+function toggleCam() {
+  if (!stream) return;
+  const t = stream.getVideoTracks()[0];
+  if (!t) return;
+  camOn = !camOn;
+  t.enabled = camOn;
+  $('#toggleCam').textContent = camOn ? 'Camera off' : 'Camera on';
+  $('#toggleCam').classList.toggle('off', !camOn);
+  const selfTile = document.getElementById('tile-' + VID);
+  if (selfTile) selfTile.classList.toggle('camoff', !camOn);
+}
+
+// Live updates from the server
+const es = new EventSource('/events');
+es.addEventListener('vjoin', e => {
+  const d = JSON.parse(e.data);
+  if (d.vid === VID) return;
+  names.set(d.vid, d.name);
+  updateCount();
+});
+es.addEventListener('vleave', e => {
+  const d = JSON.parse(e.data);
+  if (d.vid !== VID) removePeer(d.vid);
+});
+es.addEventListener('vsignal', e => onSignal(JSON.parse(e.data)));
+
+// Let the others know if this tab closes
+window.addEventListener('pagehide', () => {
+  if (joined && navigator.sendBeacon) {
+    navigator.sendBeacon('/video/leave', new Blob([JSON.stringify({ vid: VID })], { type: 'application/json' }));
+  }
+});
+
+try { $('#name').value = localStorage.getItem('chat-name') || ''; } catch (e) {}
+$('#join').addEventListener('click', join);
+$('#leave').addEventListener('click', leave);
+$('#toggleMic').addEventListener('click', toggleMic);
+$('#toggleCam').addEventListener('click', toggleCam);
+</script>
+</body>
+</html>
