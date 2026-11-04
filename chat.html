@@ -38,6 +38,8 @@ textarea{flex:1;resize:none;max-height:140px;min-height:40px;border-radius:20px;
 textarea:focus{border-color:#7c8cff}
 button{height:40px;padding:0 18px;border-radius:20px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s}
 button:hover{background:#262c3d}
+.bubble .del-btn{display:block;margin:6px 0 0 auto;height:auto;padding:2px 10px;font-size:11px;border-radius:10px;background:rgba(255,255,255,.18);border:0;color:#fff}
+.bubble .del-btn:hover{background:rgba(255,255,255,.32)}
 button:active{transform:scale(.96)}
 button.primary{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
 button.ghost{background:transparent}
@@ -67,7 +69,19 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
 
 <script>
 const $ = s => document.querySelector(s);
-const SID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+// Identifies this browser so it can delete its own messages
+const SID = (() => {
+  try {
+    let id = localStorage.getItem('chat-sid');
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('chat-sid', id);
+    }
+    return id;
+  } catch (e) {
+    return Math.random().toString(36).slice(2);
+  }
+})();
 const seen = new Set();
 const nameInput = $('#name');
 
@@ -105,6 +119,14 @@ function addMessage(m) {
   text.className = 'text';
   text.textContent = m.text;
   bubble.append(meta, text);
+  row.dataset.id = m.id;
+  if (mine) {
+    const del = document.createElement('button');
+    del.className = 'del-btn';
+    del.textContent = 'Delete';
+    del.addEventListener('click', () => deleteMessage(m.id));
+    bubble.append(del);
+  }
   row.append(bubble);
   $('#messages').append(row);
   scrollDown();
@@ -123,7 +145,28 @@ function connect() {
   });
   es.addEventListener('message', e => addMessage(JSON.parse(e.data)));
   es.addEventListener('online', e => setOnline(JSON.parse(e.data).online));
+  es.addEventListener('delete', e => removeMessage(JSON.parse(e.data).id));
   es.onerror = () => setStatus('error', 'Reconnecting…');
+}
+
+function removeMessage(id) {
+  document.querySelectorAll('.row[data-id="' + id + '"]').forEach(el => el.remove());
+}
+
+async function deleteMessage(id) {
+  try {
+    const r = await fetch('/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, sid: SID })
+    });
+    const d = await r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
+    if (!d.ok) throw new Error(d.error || 'Could not delete the message.');
+    removeMessage(id);
+    showError('');
+  } catch (err) {
+    showError(err instanceof TypeError ? 'Could not reach the server. Check your connection.' : err.message);
+  }
 }
 
 function autosizeInput() {
