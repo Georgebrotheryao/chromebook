@@ -14,7 +14,8 @@ const history = [];
 const clients = new Set();
 const rateLog = new Map();
 
-const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'));
+const chromebookHtml = fs.readFileSync(path.join(__dirname, 'chromebook.html'));
+const chatHtml = fs.readFileSync(path.join(__dirname, 'chat.html'));
 
 function broadcast(event, data) {
   const payload = 'event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n';
@@ -24,6 +25,11 @@ function broadcast(event, data) {
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
+}
+
+function sendHtml(res, body) {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(body);
 }
 
 function isRateLimited(ip) {
@@ -90,10 +96,8 @@ function handleSend(req, res) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(indexHtml);
-  }
+  if (req.method === 'GET' && url.pathname === '/') return sendHtml(res, chromebookHtml);
+  if (req.method === 'GET' && url.pathname === '/chat') return sendHtml(res, chatHtml);
   if (req.method === 'GET' && url.pathname === '/events') return handleEvents(req, res);
   if (req.method === 'POST' && url.pathname === '/send') return handleSend(req, res);
   res.writeHead(404, { 'Content-Type': 'text/plain' });
