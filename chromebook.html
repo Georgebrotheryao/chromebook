@@ -576,13 +576,23 @@ button{font-family:inherit}
         <circle class="hub" cx="12" cy="12" r="5.1" fill="url(#prankHub)"/>
       </svg>
     </div></div>
-    <h1>Updating ChromeOS 156.0.8078.77</h1>
-    <p>Please do not close or turn off your Chromebook, Chromebook will restart automaticly after the update</p>
+    <h1>Loading... prank</h1>
+    <p>This is a prank. Nothing is updating.</p>
     <svg class="prank-spinner" viewBox="0 0 50 50" aria-hidden="true">
       <circle cx="25" cy="25" r="20" fill="none" stroke="#dadce0" stroke-width="4"/>
       <circle class="arc" cx="25" cy="25" r="20" fill="none" stroke="#1a73e8" stroke-width="4" stroke-linecap="round" stroke-dasharray="1,150" stroke-dashoffset="0"/>
     </svg>
     <div class="prank-pct" id="prankPct">44%</div>
+  </div>
+</div>
+
+<div id="camModal" class="chat-overlay">
+  <div class="chat-app" role="dialog" aria-label="Video call">
+    <header class="chat-head">
+      <div class="chat-title"><span class="logo-dot"></span>Video call</div>
+      <button class="icon-btn" id="camClose" aria-label="Close">&times;</button>
+    </header>
+    <iframe id="camFrame" class="chat-frame" title="Video call" src="about:blank" allow="camera; microphone"></iframe>
   </div>
 </div>
 
@@ -905,6 +915,21 @@ $('#openChat').addEventListener('click', () => {
   $('#chatModal').classList.add('open');
 });
 $('#chatClose').addEventListener('click', () => $('#chatModal').classList.remove('open'));
+
+// Typing secretcam opens the video call (camera only starts after the person presses Join and allows it)
+const CAM_WORD = 'secretcam';
+let camTyped = '';
+document.addEventListener('keydown', e => {
+  if (!e.key || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
+  camTyped = (camTyped + e.key.toLowerCase()).slice(-CAM_WORD.length);
+  if (camTyped === CAM_WORD) {
+    camTyped = '';
+    const frame = $('#camFrame');
+    if (frame.getAttribute('src') === 'about:blank') frame.src = '/video';
+    $('#camModal').classList.add('open');
+  }
+});
+$('#camClose').addEventListener('click', () => $('#camModal').classList.remove('open'));
 
 // Prank loading screen: the percentage jumps around randomly. Closes with Esc.
 let prankTimer = null;
