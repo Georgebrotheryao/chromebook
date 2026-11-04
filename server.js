@@ -6,10 +6,11 @@ const PORT = process.env.PORT || 3000;
 const HISTORY_LIMIT = 200;
 const MAX_TEXT = 1000;
 const MAX_BODY = 8 * 1024;
+const MAX_SIGNAL = 64 * 1024;
 const RATE_WINDOW_MS = 5000;
 const RATE_MAX = 5;
+const MAX_CALL = 8;
 
-// Keep the server alive if one connection misbehaves
 process.on('uncaughtException', err => console.error('Uncaught error:', err));
 process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
 
@@ -17,6 +18,7 @@ let nextId = 1;
 const history = [];
 const clients = new Set();
 const rateLog = new Map();
+const participants = new Map();
 
 function loadFile(name) {
   try {
@@ -28,6 +30,7 @@ function loadFile(name) {
 }
 const chromebookHtml = loadFile('chromebook.html');
 const chatHtml = loadFile('chat.html');
+const videoHtml = loadFile('video.html');
 
 function safeWrite(res, data) {
   try {
@@ -53,6 +56,34 @@ function sendHtml(res, body) {
   res.end(body);
 }
 
+function readBody(req, res, limit, handler) {
+  const chunks = [];
+  let total = 0;
+  let done = false;
+  req.on('error', () => {});
+  req.on('data', chunk => {
+    if (done) return;
+    total += chunk.length;
+    if (total > limit) {
+      done = true;
+      sendJson(res, 413, { ok: false, error: 'Request too large' });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  req.on('end', () => {
+    if (done) return;
+    let data;
+    try {
+      data = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    } catch (e) {
+      return sendJson(res, 400, { ok: false, error: 'Bad request' });
+    }
+    handler(data);
+  });
+}
+
 function isRateLimited(ip) {
   const now = Date.now();
   const recent = (rateLog.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
@@ -61,6 +92,8 @@ function isRateLimited(ip) {
   rateLog.set(ip, recent);
   return limited;
 }
+
+// ---------- Chat ----------
 
 function handleEvents(req, res) {
   res.on('error', () => clients.delete(res));
@@ -84,51 +117,8 @@ function handleEvents(req, res) {
   res.on('close', cleanup);
 }
 
-function handleDelete(req, res) {
-  let body = '';
-  req.on('error', () => {});
-  req.on('data', chunk => {
-    body += chunk;
-    if (body.length > MAX_BODY) req.destroy();
-  });
-  req.on('end', () => {
-    let data;
-    try {
-      data = JSON.parse(body);
-    } catch (e) {
-      return sendJson(res, 400, { ok: false, error: 'Bad request' });
-    }
-    const id = Number(data.id);
-    const sid = String(data.sid || '');
-    const idx = history.findIndex(m => m.id === id);
-    if (idx === -1) return sendJson(res, 404, { ok: false, error: 'Message not found' });
-    if (!sid || history[idx].sid !== sid) return sendJson(res, 403, { ok: false, error: 'You can only delete your own messages' });
-    history.splice(idx, 1);
-    broadcast('delete', { id: id });
-    sendJson(res, 200, { ok: true });
-  });
-}
-
 function handleSend(req, res) {
-  let body = '';
-  let tooBig = false;
-  req.on('error', () => {});
-  req.on('data', chunk => {
-    body += chunk;
-    if (body.length > MAX_BODY && !tooBig) {
-      tooBig = true;
-      sendJson(res, 413, { ok: false, error: 'Message too large' });
-      req.destroy();
-    }
-  });
-  req.on('end', () => {
-    if (tooBig) return;
-    let data;
-    try {
-      data = JSON.parse(body);
-    } catch (e) {
-      return sendJson(res, 400, { ok: false, error: 'Bad request' });
-    }
+  readBody(req, res, MAX_BODY, data => {
     const name = String(data.name || '').trim().slice(0, 24) || 'Guest';
     const text = String(data.text || '').trim();
     const sid = String(data.sid || '').slice(0, 64);
@@ -144,14 +134,71 @@ function handleSend(req, res) {
   });
 }
 
+function handleDelete(req, res) {
+  readBody(req, res, MAX_BODY, data => {
+    const id = Number(data.id);
+    const sid = String(data.sid || '');
+    const idx = history.findIndex(m => m.id === id);
+    if (idx === -1) return sendJson(res, 404, { ok: false, error: 'Message not found' });
+    if (!sid || history[idx].sid !== sid) return sendJson(res, 403, { ok: false, error: 'You can only delete your own messages' });
+    history.splice(idx, 1);
+    broadcast('delete', { id: id });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+// ---------- Video call (WebRTC signaling only; video goes peer to peer) ----------
+
+function handleVideoJoin(req, res) {
+  readBody(req, res, MAX_BODY, data => {
+    const vid = String(data.vid || '').slice(0, 64);
+    const name = String(data.name || '').trim().slice(0, 24) || 'Guest';
+    if (!vid) return sendJson(res, 400, { ok: false, error: 'Missing id' });
+    if (!participants.has(vid) && participants.size >= MAX_CALL) {
+      return sendJson(res, 409, { ok: false, error: 'The call is full (' + MAX_CALL + ' people).' });
+    }
+    participants.set(vid, { vid: vid, name: name });
+    const peers = [...participants.values()].filter(p => p.vid !== vid);
+    broadcast('vjoin', { vid: vid, name: name });
+    sendJson(res, 200, { ok: true, peers: peers });
+  });
+}
+
+function handleVideoLeave(req, res) {
+  readBody(req, res, MAX_BODY, data => {
+    const vid = String(data.vid || '').slice(0, 64);
+    if (participants.delete(vid)) broadcast('vleave', { vid: vid });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleVideoSignal(req, res) {
+  readBody(req, res, MAX_SIGNAL, data => {
+    const to = String(data.to || '').slice(0, 64);
+    const from = String(data.from || '').slice(0, 64);
+    const kind = String(data.kind || '');
+    if (!to || !from || !['offer', 'answer', 'ice'].includes(kind)) return sendJson(res, 400, { ok: false, error: 'Bad signal' });
+    if (!participants.has(from)) return sendJson(res, 403, { ok: false, error: 'Not in the call' });
+    broadcast('vsignal', { to: to, from: from, kind: kind, data: data.data });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+// ---------- Server ----------
+
 const server = http.createServer((req, res) => {
   res.on('error', () => {});
   const url = new URL(req.url, 'http://localhost');
-  if (req.method === 'GET' && url.pathname === '/') return sendHtml(res, chromebookHtml);
-  if (req.method === 'GET' && url.pathname === '/chat') return sendHtml(res, chatHtml);
-  if (req.method === 'GET' && url.pathname === '/events') return handleEvents(req, res);
-  if (req.method === 'POST' && url.pathname === '/send') return handleSend(req, res);
-  if (req.method === 'POST' && url.pathname === '/delete') return handleDelete(req, res);
+  const p = url.pathname;
+  if (req.method === 'GET' && p === '/') return sendHtml(res, chromebookHtml);
+  if (req.method === 'GET' && p === '/chat') return sendHtml(res, chatHtml);
+  if (req.method === 'GET' && p === '/video') return sendHtml(res, videoHtml);
+  if (req.method === 'GET' && p === '/events') return handleEvents(req, res);
+  if (req.method === 'POST' && p === '/send') return handleSend(req, res);
+  if (req.method === 'POST' && p === '/delete') return handleDelete(req, res);
+  if (req.method === 'POST' && p === '/video/join') return handleVideoJoin(req, res);
+  if (req.method === 'POST' && p === '/video/leave') return handleVideoLeave(req, res);
+  if (req.method === 'POST' && p === '/video/signal') return handleVideoSignal(req, res);
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
