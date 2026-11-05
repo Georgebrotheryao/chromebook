@@ -16,6 +16,7 @@ const SESSION_DAYS = 30;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX = 10;
 const PENDING_MAX = 20;
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 
 process.on('uncaughtException', err => console.error('Uncaught error:', err));
 process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
@@ -76,6 +77,7 @@ const chromebookHtml = loadFile('chromebook.html');
 const chatHtml = loadFile('chat.html');
 const videoHtml = loadFile('video.html');
 const loginHtml = loadFile('login.html');
+const adminHtml = loadFile('admin.html');
 
 function safeWrite(res, data) {
   try {
@@ -224,10 +226,82 @@ function handleLogout(req, res) {
   sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
 }
 
+function isAdmin(u) {
+  return !!u && !!ADMIN_EMAIL && u.email === ADMIN_EMAIL;
+}
+
 function handleMe(req, res) {
   const user = currentUser(req);
-  sendJson(res, 200, { user: user ? publicUser(user) : null });
+  sendJson(res, 200, { user: user ? publicUser(user) : null, admin: isAdmin(user) });
 }
+
+// ---------- Support (admin) ----------
+function requireAdmin(req, res) {
+  const me = currentUser(req);
+  if (!me) { sendJson(res, 401, { ok: false, error: 'Sign in first' }); return null; }
+  if (!isAdmin(me)) { sendJson(res, 403, { ok: false, error: 'Admins only' }); return null; }
+  return me;
+}
+
+function sendToUser(uid, event, data) {
+  const payload = 'event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n';
+  clients.forEach((u, res) => { if (u === uid) safeWrite(res, payload); });
+}
+
+function handleAdminUsers(req, res) {
+  if (!requireAdmin(req, res)) return;
+  const online = onlineUids();
+  const inCall = new Set([...participants.values()].map(p => p.uid));
+  const list = [...users.values()]
+    .map(u => ({ id: u.id, name: u.name, email: u.email, online: online.has(u.id), inCall: inCall.has(u.id) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  sendJson(res, 200, { ok: true, users: list });
+}
+
+function handleAdminRename(req, res) {
+  if (!requireAdmin(req, res)) return;
+  readBody(req, res, MAX_BODY, data => {
+    const user = users.get(String(data.id || ''));
+    const name = String(data.name || '').trim().slice(0, 24);
+    if (!user) return sendJson(res, 404, { ok: false, error: 'Account not found' });
+    if (!name) return sendJson(res, 400, { ok: false, error: 'Enter a name' });
+    user.name = name;
+    saveUsers();
+    participants.forEach(p => { if (p.uid === user.id) p.name = name; });
+    history.forEach(m => { if (m.uid === user.id) m.name = name; });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+// Asks the person to change their camera. It only shows a request they can accept or ignore.
+function handleAdminCamera(req, res) {
+  if (!requireAdmin(req, res)) return;
+  readBody(req, res, MAX_BODY, data => {
+    const uid = String(data.id || '');
+    const action = String(data.action || '');
+    if (action !== 'off') return sendJson(res, 400, { ok: false, error: 'Unknown request' });
+    const inCall = [...participants.values()].some(p => p.uid === uid);
+    if (!inCall) return sendJson(res, 409, { ok: false, error: 'That person is not in the video call.' });
+    sendToUser(uid, 'camrequest', { action: action, from: 'Support' });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleVideoCaption(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const vid = String(data.vid || '').slice(0, 64);
+    const text = String(data.text || '').trim().slice(0, 300);
+    const p = participants.get(vid);
+    if (!p || p.uid !== me.id) return sendJson(res, 403, { ok: false, error: 'Not in the call' });
+    if (!text) return sendJson(res, 400, { ok: false, error: 'Empty caption' });
+    broadcast('vcaption', { vid: vid, name: p.name, text: text });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+// ---------- Server ----------
 
 function handleUsers(req, res) {
   const me = requireUser(req, res);
@@ -404,6 +478,10 @@ const server = http.createServer((req, res) => {
   if (get && p === '/chat') return sendHtml(res, chatHtml);
   if (get && p === '/video') return sendHtml(res, videoHtml);
   if (get && p === '/login') return sendHtml(res, loginHtml);
+  if (get && p === '/admin') return sendHtml(res, adminHtml);
+  if (get && p === '/api/admin/users') return handleAdminUsers(req, res);
+  if (post && p === '/api/admin/rename') return handleAdminRename(req, res);
+  if (post && p === '/api/admin/camera') return handleAdminCamera(req, res);
   if (get && p === '/api/me') return handleMe(req, res);
   if (get && p === '/api/users') return handleUsers(req, res);
   if (get && p === '/events') return handleEvents(req, res);
@@ -417,6 +495,7 @@ const server = http.createServer((req, res) => {
   if (post && p === '/video/join') return handleVideoJoin(req, res);
   if (post && p === '/video/leave') return handleVideoLeave(req, res);
   if (post && p === '/video/signal') return handleVideoSignal(req, res);
+  if (post && p === '/video/caption') return handleVideoCaption(req, res);
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
