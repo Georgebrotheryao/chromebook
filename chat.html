@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LocalChat</title>
 <style>
+[hidden]{display:none !important}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
-body{display:flex;justify-content:center;padding:16px}
-.app{width:min(720px,100%);height:100%;display:flex;flex-direction:column;background:#0f1117;border:1px solid #232734;border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:popIn .3s cubic-bezier(.16,1,.3,1)}
+body{display:flex;justify-content:center;padding:12px}
+.app{position:relative;width:min(760px,100%);height:100%;display:flex;flex-direction:column;background:#0f1117;border:1px solid #232734;border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:popIn .3s cubic-bezier(.16,1,.3,1)}
 @keyframes popIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-header{display:flex;align-items:center;gap:12px;padding:14px 16px;background:#131722;border-bottom:1px solid #1f2330;flex-wrap:wrap}
-.title{display:flex;align-items:center;gap:8px;font-weight:600;margin-right:auto;font-size:15px}
+header{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#131722;border-bottom:1px solid #1f2330;flex-wrap:wrap}
+.title{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;margin-right:auto}
 .logo{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#7c8cff,#3ddc97)}
+.me{font-size:12px;color:#b9c3dc}
 .online{font-size:12px;color:#8a93a8;white-space:nowrap}
-input.name{width:130px;height:30px;border-radius:15px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 10px;font:inherit;font-size:12px;outline:none}
-input.name:focus{border-color:#7c8cff}
 .status{display:flex;align-items:center;gap:6px;font-size:12px;color:#9aa3b8;white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:#5b6378}
 .status.busy .dot{background:#f5b942;animation:pulse 1.2s infinite}
@@ -23,7 +23,6 @@ input.name:focus{border-color:#7c8cff}
 .status.error .dot{background:#ff5d6c}
 @keyframes pulse{50%{opacity:.3}}
 .error{margin:10px 14px 0;padding:9px 12px;border-radius:10px;background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.35);color:#ff9aa4;font-size:13px}
-.error[hidden]{display:none}
 .messages{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
 .row{display:flex}
 .row.me{justify-content:flex-end}
@@ -33,26 +32,43 @@ input.name:focus{border-color:#7c8cff}
 .row.other .bubble{border-bottom-left-radius:5px}
 .meta{font-size:11px;opacity:.7;margin-bottom:2px}
 .text{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.del-btn{display:block;margin:6px 0 0 auto;padding:2px 10px;font-size:11px;border-radius:10px;background:rgba(255,255,255,.18);border:0;color:#fff;cursor:pointer}
+.del-btn:hover{background:rgba(255,255,255,.32)}
+.system{align-self:center;font-size:12px;color:#7d869b;background:#171b26;padding:4px 10px;border-radius:10px}
 .composer{display:flex;gap:8px;align-items:flex-end;padding:10px 12px;border-top:1px solid #1f2330;background:#131722}
 textarea{flex:1;resize:none;max-height:140px;min-height:40px;border-radius:20px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:10px 14px;font:inherit;font-size:14px;outline:none;line-height:1.4}
 textarea:focus{border-color:#7c8cff}
-button{height:40px;padding:0 18px;border-radius:20px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s}
+button{height:38px;padding:0 16px;border-radius:19px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s}
 button:hover{background:#262c3d}
-.bubble .del-btn{display:block;margin:6px 0 0 auto;height:auto;padding:2px 10px;font-size:11px;border-radius:10px;background:rgba(255,255,255,.18);border:0;color:#fff}
-.bubble .del-btn:hover{background:rgba(255,255,255,.32)}
 button:active{transform:scale(.96)}
 button.primary{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
 button.ghost{background:transparent}
 footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px 12px;background:#131722;font-size:12px;color:#8a93a8}
-@media (max-width:600px){.bubble{max-width:88%}.title{width:100%}}
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:14px;z-index:5;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.panel{width:min(400px,100%);max-height:100%;display:flex;flex-direction:column;background:#131722;border:1px solid #232734;border-radius:16px;overflow:hidden;animation:popIn .25s cubic-bezier(.16,1,.3,1)}
+.panel-head{padding:14px 16px;font-weight:600;border-bottom:1px solid #1f2330}
+.panel-note{padding:8px 16px 0;font-size:12px;color:#8a93a8}
+.people{flex:1;min-height:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.person{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:12px;background:#0c0f16;cursor:pointer;font-size:14px}
+.person:hover{background:#171b26}
+.person input{width:16px;height:16px;accent-color:#7c8cff;cursor:pointer}
+.pdot{width:8px;height:8px;border-radius:50%;background:#4b5263;flex:none}
+.pdot.on{background:#3ddc97;box-shadow:0 0 6px #3ddc97}
+.person .pname{flex:1}
+.person .plabel{font-size:11px;color:#6b7389}
+.panel-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px;border-top:1px solid #1f2330}
+.empty{color:#6b7389;font-size:13px;padding:10px 4px}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <div class="title"><span class="logo"></span>LocalChat</div>
-    <span class="online" id="online">Connecting…</span>
-    <input class="name" id="name" maxlength="24" placeholder="Your name" aria-label="Your name">
+    <span class="me" id="me"></span>
+    <span class="online" id="online"></span>
+    <button id="inviteBtn">Invite</button>
+    <button class="ghost" id="signout">Sign out</button>
     <div class="status busy" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
   </header>
   <div class="error" id="error" hidden></div>
@@ -63,33 +79,27 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
   </div>
   <footer>
     <button class="ghost" id="clear">Clear view</button>
-    <span>Everyone on this site sees these messages.</span>
+    <span>Everyone who signs in sees these messages.</span>
   </footer>
+
+  <div class="overlay" id="invitePanel" hidden>
+    <div class="panel">
+      <div class="panel-head">Invite people to the chat</div>
+      <div class="panel-note" id="inviteNote">Choose who to invite. They get a notification in the Chromebook.</div>
+      <div class="people" id="people"></div>
+      <div class="panel-foot">
+        <button class="ghost" id="inviteCancel">Cancel</button>
+        <button class="primary" id="inviteSend">Send invite</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
-// Identifies this browser so it can delete its own messages
-const SID = (() => {
-  try {
-    let id = localStorage.getItem('chat-sid');
-    if (!id) {
-      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem('chat-sid', id);
-    }
-    return id;
-  } catch (e) {
-    return Math.random().toString(36).slice(2);
-  }
-})();
 const seen = new Set();
-const nameInput = $('#name');
-
-nameInput.value = localStorage.getItem('chat-name') || 'Guest';
-nameInput.addEventListener('change', () => {
-  nameInput.value = nameInput.value.trim().slice(0, 24) || 'Guest';
-  localStorage.setItem('chat-name', nameInput.value);
-});
+let ME = null;
+let es = null;
 
 function setStatus(kind, text) {
   $('#status').className = 'status ' + kind;
@@ -104,12 +114,26 @@ function setOnline(n) { $('#online').textContent = n + ' online'; }
 function fmtClock(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 function scrollDown() { const m = $('#messages'); m.scrollTop = m.scrollHeight; }
 
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  return r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
+}
+
+function removeMessage(id) {
+  document.querySelectorAll('.row[data-id="' + id + '"]').forEach(el => el.remove());
+}
+
 function addMessage(m) {
   if (seen.has(m.id)) return;
   seen.add(m.id);
-  const mine = m.sid === SID;
+  const mine = m.uid === ME.id;
   const row = document.createElement('div');
   row.className = 'row ' + (mine ? 'me' : 'other');
+  row.dataset.id = m.id;
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   const meta = document.createElement('div');
@@ -119,7 +143,6 @@ function addMessage(m) {
   text.className = 'text';
   text.textContent = m.text;
   bubble.append(meta, text);
-  row.dataset.id = m.id;
   if (mine) {
     const del = document.createElement('button');
     del.className = 'del-btn';
@@ -132,10 +155,15 @@ function addMessage(m) {
   scrollDown();
 }
 
-// EventSource reconnects by itself. On reconnect the server sends the recent history again,
-// and "seen" stops messages from showing twice.
+async function deleteMessage(id) {
+  const d = await api('/delete', { id: id });
+  if (!d.ok) return showError(d.error || 'Could not delete the message.');
+  removeMessage(id);
+  showError('');
+}
+
 function connect() {
-  const es = new EventSource('/events');
+  es = new EventSource('/events');
   es.addEventListener('hello', e => {
     const d = JSON.parse(e.data);
     setStatus('ok', 'Connected');
@@ -144,69 +172,110 @@ function connect() {
     d.history.forEach(addMessage);
   });
   es.addEventListener('message', e => addMessage(JSON.parse(e.data)));
-  es.addEventListener('online', e => setOnline(JSON.parse(e.data).online));
   es.addEventListener('delete', e => removeMessage(JSON.parse(e.data).id));
+  es.addEventListener('online', e => setOnline(JSON.parse(e.data).online));
   es.onerror = () => setStatus('error', 'Reconnecting…');
-}
-
-function removeMessage(id) {
-  document.querySelectorAll('.row[data-id="' + id + '"]').forEach(el => el.remove());
-}
-
-async function deleteMessage(id) {
-  try {
-    const r = await fetch('/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id, sid: SID })
-    });
-    const d = await r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
-    if (!d.ok) throw new Error(d.error || 'Could not delete the message.');
-    removeMessage(id);
-    showError('');
-  } catch (err) {
-    showError(err instanceof TypeError ? 'Could not reach the server. Check your connection.' : err.message);
-  }
-}
-
-function autosizeInput() {
-  const t = $('#input');
-  t.style.height = 'auto';
-  t.style.height = Math.min(t.scrollHeight, 140) + 'px';
 }
 
 async function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
   if (!text) return;
-  const name = nameInput.value.trim().slice(0, 24) || 'Guest';
   input.value = '';
-  autosizeInput();
+  autosize();
   try {
-    const r = await fetch('/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, text: text, sid: SID })
-    });
-    const d = await r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
+    const d = await api('/send', { text: text });
     if (!d.ok) throw new Error(d.error || 'Could not send the message.');
     showError('');
   } catch (err) {
     input.value = text;
-    autosizeInput();
+    autosize();
     showError(err instanceof TypeError ? 'Could not reach the server. Check your connection.' : err.message);
   }
+}
+
+function autosize() {
+  const t = $('#input');
+  t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+}
+
+// ----- Invites -----
+async function openInvite() {
+  showError('');
+  $('#people').innerHTML = '';
+  $('#inviteNote').textContent = 'Choose who to invite. They get a notification in the Chromebook.';
+  $('#invitePanel').hidden = false;
+  const d = await api('/api/users').catch(() => null);
+  const list = d && d.users ? d.users : [];
+  if (!list.length) {
+    $('#people').innerHTML = '<div class="empty">No other accounts yet.</div>';
+    return;
+  }
+  list.forEach(u => {
+    const label = document.createElement('label');
+    label.className = 'person';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = u.id;
+    const dot = document.createElement('span');
+    dot.className = 'pdot' + (u.online ? ' on' : '');
+    const name = document.createElement('span');
+    name.className = 'pname';
+    name.textContent = u.name;
+    const state = document.createElement('span');
+    state.className = 'plabel';
+    state.textContent = u.online ? 'online' : 'offline';
+    label.append(cb, dot, name, state);
+    $('#people').append(label);
+  });
+}
+
+async function sendInvites() {
+  const ids = [...document.querySelectorAll('#people input:checked')].map(cb => cb.value);
+  if (!ids.length) return ($('#inviteNote').textContent = 'Pick at least one person.');
+  const d = await api('/api/invite', { kind: 'chat', to: ids });
+  if (!d.ok) return ($('#inviteNote').textContent = d.error || 'Could not send the invite.');
+  $('#inviteNote').textContent = 'Invite sent to ' + ids.length + ' ' + (ids.length === 1 ? 'person' : 'people') + '.';
+  setTimeout(() => { $('#invitePanel').hidden = true; }, 900);
+}
+
+// ----- Start -----
+async function init() {
+  let d;
+  try {
+    d = await (await fetch('/api/me')).json();
+  } catch (e) {
+    setStatus('error', 'Offline');
+    showError('Could not reach the server. Check your connection.');
+    return;
+  }
+  if (!d.user) {
+    location.href = '/login?next=' + encodeURIComponent('/chat');
+    return;
+  }
+  ME = d.user;
+  $('#me').textContent = 'Signed in as ' + ME.name;
+  connect();
+  $('#input').focus();
 }
 
 $('#send').addEventListener('click', sendMessage);
 $('#input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
 });
-$('#input').addEventListener('input', autosizeInput);
+$('#input').addEventListener('input', autosize);
 $('#clear').addEventListener('click', () => { $('#messages').innerHTML = ''; });
+$('#inviteBtn').addEventListener('click', openInvite);
+$('#inviteCancel').addEventListener('click', () => { $('#invitePanel').hidden = true; });
+$('#inviteSend').addEventListener('click', sendInvites);
+$('#signout').addEventListener('click', async () => {
+  if (es) es.close();
+  await fetch('/api/logout', { method: 'POST' });
+  location.href = '/login?next=' + encodeURIComponent('/chat');
+});
 
-connect();
-$('#input').focus();
+init();
 </script>
 </body>
 </html>
