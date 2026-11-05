@@ -293,10 +293,11 @@ function handleVideoCaption(req, res) {
   readBody(req, res, MAX_BODY, data => {
     const vid = String(data.vid || '').slice(0, 64);
     const text = String(data.text || '').trim().slice(0, 300);
+    const final = data.final !== false;
     const p = participants.get(vid);
     if (!p || p.uid !== me.id) return sendJson(res, 403, { ok: false, error: 'Not in the call' });
     if (!text) return sendJson(res, 400, { ok: false, error: 'Empty caption' });
-    broadcast('vcaption', { vid: vid, name: p.name, text: text });
+    broadcast('vcaption', { vid: vid, name: p.name, text: text, final: final });
     sendJson(res, 200, { ok: true });
   });
 }
@@ -474,7 +475,13 @@ const server = http.createServer((req, res) => {
   const p = url.pathname;
   const get = req.method === 'GET';
   const post = req.method === 'POST';
-  if (get && p === '/') return sendHtml(res, chromebookHtml);
+  if (get && p === '/') {
+    if (!currentUser(req)) {
+      res.writeHead(302, { 'Location': '/login?next=%2F' });
+      return res.end();
+    }
+    return sendHtml(res, chromebookHtml);
+  }
   if (get && p === '/chat') return sendHtml(res, chatHtml);
   if (get && p === '/video') return sendHtml(res, videoHtml);
   if (get && p === '/login') return sendHtml(res, loginHtml);
