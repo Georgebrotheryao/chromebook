@@ -357,6 +357,7 @@ $('#camReqYes').addEventListener('click', () => {
 // Chrome's speech recognition sends the audio to Google to do this.
 let captionsOn = false;
 let recog = null;
+const captionLines = new Map();   // speaker id -> the line currently being shown
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function setCaptionBtn() {
@@ -376,14 +377,16 @@ function startCaptions() {
   if (!SR || recog) return;
   const r = new SR();
   r.continuous = true;
-  r.interimResults = false;
+  r.interimResults = true;
   r.lang = navigator.language || 'en-US';
   r.onresult = e => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        const text = e.results[i][0].transcript.trim();
-        if (text) post('/video/caption', { vid: VID, text: text }).catch(() => {});
-      }
+      const text = e.results[i][0].transcript.trim();
+      const final = e.results[i].isFinal;
+      if (!text) continue;
+      // Show your own words at once, and send them to the call without waiting
+      addOrUpdateCaption(VID, ME ? ME.name : 'You', text, final);
+      post('/video/caption', { vid: VID, text: text, final: final }).catch(() => {});
     }
   };
   r.onerror = e => {
@@ -410,22 +413,37 @@ function stopCaptions() {
   }
 }
 
-function addCaption(name, text) {
+// Updates the same line while someone is still talking, so captions change word by word
+function addOrUpdateCaption(id, name, text, final) {
   const box = $('#captions');
-  const line = document.createElement('div');
-  line.className = 'cap';
-  const who = document.createElement('b');
-  who.textContent = name + ': ';
-  line.append(who, document.createTextNode(text));
-  box.append(line);
-  while (box.children.length > 3) box.firstChild.remove();
-  setTimeout(() => line.remove(), 9000);
+  let line = captionLines.get(id);
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'cap';
+    const who = document.createElement('b');
+    who.textContent = name + ': ';
+    const words = document.createElement('span');
+    line.append(who, words);
+    box.append(line);
+    captionLines.set(id, line);
+    while (box.children.length > 3) {
+      const old = box.firstChild;
+      captionLines.forEach((v, k) => { if (v === old) captionLines.delete(k); });
+      old.remove();
+    }
+  }
+  line.querySelector('span').textContent = text;
+  if (final) {
+    captionLines.delete(id);
+    setTimeout(() => line.remove(), 6000);
+  }
 }
 
 es.addEventListener('vcaption', e => {
   if (!joined) return;
   const d = JSON.parse(e.data);
-  addCaption(d.name, d.text);
+  if (d.vid === VID) return; // already shown locally
+  addOrUpdateCaption(d.vid, d.name, d.text, d.final);
 });
 
 $('#toggleCap').addEventListener('click', () => {
