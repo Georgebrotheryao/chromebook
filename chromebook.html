@@ -163,6 +163,20 @@ button{font-family:inherit}
 .chat-foot{display:flex;justify-content:space-between;padding:8px 12px 12px;background:#131722}
 .chat-frame{flex:1;min-height:0;width:100%;border:0;background:#0f1117}
 
+/* Invite notifications */
+.toasts{position:fixed;top:16px;right:16px;z-index:200;display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.toast{pointer-events:auto;min-width:300px;max-width:380px;background:#ffffff;color:#202124;border-radius:16px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-family:"Google Sans",Roboto,system-ui,sans-serif;animation:toastIn .35s cubic-bezier(.16,1,.3,1)}
+@keyframes toastIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:none}}
+.toast.leaving{animation:toastOut .25s ease-in forwards}
+@keyframes toastOut{to{opacity:0;transform:translateX(30px)}}
+.toast-title{font-size:14px;font-weight:500}
+.toast-sub{font-size:12px;color:#5f6368}
+.toast-actions{display:flex;gap:8px;justify-content:flex-end}
+.toast-btn{height:32px;padding:0 14px;border-radius:16px;border:1px solid #dadce0;background:#fff;color:#202124;font:inherit;font-size:13px;cursor:pointer}
+.toast-btn:hover{background:#f1f3f4}
+.toast-btn.primary{background:#1a73e8;border-color:#1a73e8;color:#fff}
+.toast-btn.primary:hover{background:#1765cc}
+
 /* Prank loading screen (clearly labelled as a prank) */
 .prank{position:fixed;inset:0;z-index:150;display:none;align-items:center;justify-content:center;pointer-events:none;font-family:"Google Sans",Roboto,system-ui,sans-serif;color:#202124;text-align:center}
 .prank.open{display:flex}
@@ -586,6 +600,8 @@ button{font-family:inherit}
   </div>
 </div>
 
+<div class="toasts" id="toasts"></div>
+
 <div id="camModal" class="chat-overlay">
   <div class="chat-app" role="dialog" aria-label="Video call">
     <header class="chat-head">
@@ -909,12 +925,74 @@ function isEditable(el) {
 }
 
 // LocalChat: the chat page is loaded from /chat the first time the window opens
-$('#openChat').addEventListener('click', () => {
+function openChatWindow() {
   const frame = $('#chatFrame');
   if (frame.getAttribute('src') === 'about:blank') frame.src = '/chat';
   $('#chatModal').classList.add('open');
-});
+  ensureNotify();
+}
+function openCamWindow() {
+  const frame = $('#camFrame');
+  if (frame.getAttribute('src') === 'about:blank') frame.src = '/video';
+  $('#camModal').classList.add('open');
+  ensureNotify();
+}
+$('#openChat').addEventListener('click', openChatWindow);
 $('#chatClose').addEventListener('click', () => $('#chatModal').classList.remove('open'));
+
+// Invite notifications: shown when someone invites this account to the chat or a video call
+let notifySource = null;
+async function ensureNotify() {
+  if (notifySource) return;
+  try {
+    const d = await (await fetch('/api/me')).json();
+    if (!d.user) return;
+  } catch (e) {
+    return;
+  }
+  notifySource = new EventSource('/notify');
+  notifySource.addEventListener('hello', e => {
+    JSON.parse(e.data).pending.forEach(showInvite);
+  });
+  notifySource.addEventListener('invite', e => showInvite(JSON.parse(e.data)));
+}
+
+function showInvite(inv) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  const title = document.createElement('div');
+  title.className = 'toast-title';
+  const isCall = inv.kind === 'call';
+  title.textContent = inv.from.name + (isCall ? ' invited you to a video call' : ' invited you to the chat');
+  const sub = document.createElement('div');
+  sub.className = 'toast-sub';
+  sub.textContent = isCall ? 'Open the call and press Join with camera to take part.' : 'Open the chat to reply.';
+  const actions = document.createElement('div');
+  actions.className = 'toast-actions';
+  const dismiss = document.createElement('button');
+  dismiss.className = 'toast-btn';
+  dismiss.textContent = 'Dismiss';
+  const open = document.createElement('button');
+  open.className = 'toast-btn primary';
+  open.textContent = 'Open';
+  actions.append(dismiss, open);
+  toast.append(title, sub, actions);
+  $('#toasts').append(toast);
+
+  const close = () => {
+    toast.classList.add('leaving');
+    setTimeout(() => toast.remove(), 260);
+  };
+  dismiss.addEventListener('click', close);
+  open.addEventListener('click', () => {
+    close();
+    if (isCall) openCamWindow();
+    else openChatWindow();
+  });
+  setTimeout(close, 60000);
+}
+
+ensureNotify();
 
 // Typing secretcam opens the video call (camera only starts after the person presses Join and allows it)
 const CAM_WORD = 'secretcam';
@@ -924,9 +1002,7 @@ document.addEventListener('keydown', e => {
   camTyped = (camTyped + e.key.toLowerCase()).slice(-CAM_WORD.length);
   if (camTyped === CAM_WORD) {
     camTyped = '';
-    const frame = $('#camFrame');
-    if (frame.getAttribute('src') === 'about:blank') frame.src = '/video';
-    $('#camModal').classList.add('open');
+    openCamWindow();
   }
 });
 $('#camClose').addEventListener('click', () => $('#camModal').classList.remove('open'));
