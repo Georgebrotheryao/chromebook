@@ -32,6 +32,7 @@ const clients = new Map();        // chat SSE response -> user id
 const notifyClients = new Map();  // user id -> Set of notification SSE responses
 const pendingInvites = new Map(); // user id -> [invites waiting for them to connect]
 let nextMsgId = 1;
+let nextCallMsgId = 1;
 const history = [];
 
 // ---------- Accounts storage ----------
@@ -302,6 +303,22 @@ function handleVideoCaption(req, res) {
   });
 }
 
+function handleVideoChat(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const vid = String(data.vid || '').slice(0, 64);
+    const text = String(data.text || '').trim().slice(0, 500);
+    const p = participants.get(vid);
+    if (!p || p.uid !== me.id) return sendJson(res, 403, { ok: false, error: 'Not in the call' });
+    if (!text) return sendJson(res, 400, { ok: false, error: 'Empty message' });
+    if (isRateLimited('vchat:' + me.id)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
+    const id = nextCallMsgId++;
+    broadcast('vchat', { id: id, vid: vid, name: p.name, text: text, ts: Date.now() });
+    sendJson(res, 200, { ok: true, id: id });
+  });
+}
+
 // ---------- Server ----------
 
 function handleUsers(req, res) {
@@ -503,6 +520,7 @@ const server = http.createServer((req, res) => {
   if (post && p === '/video/leave') return handleVideoLeave(req, res);
   if (post && p === '/video/signal') return handleVideoSignal(req, res);
   if (post && p === '/video/caption') return handleVideoCaption(req, res);
+  if (post && p === '/video/chat') return handleVideoChat(req, res);
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not found');
 });
