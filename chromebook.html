@@ -602,6 +602,16 @@ button{font-family:inherit}
 
 <div class="toasts" id="toasts"></div>
 
+<div id="adminModal" class="chat-overlay">
+  <div class="chat-app" role="dialog" aria-label="Support panel">
+    <header class="chat-head">
+      <div class="chat-title"><span class="logo-dot"></span>Support panel</div>
+      <button class="icon-btn" id="adminClose" aria-label="Close">&times;</button>
+    </header>
+    <iframe id="adminFrame" class="chat-frame" title="Support panel" src="about:blank"></iframe>
+  </div>
+</div>
+
 <div id="camModal" class="chat-overlay">
   <div class="chat-app" role="dialog" aria-label="Video call">
     <header class="chat-head">
@@ -993,6 +1003,21 @@ function showInvite(inv) {
 }
 
 ensureNotify();
+
+// Typing secretadmin opens the support panel (only works for the support account)
+const ADMIN_WORD = 'secretadmin';
+let adminTyped = '';
+document.addEventListener('keydown', e => {
+  if (!e.key || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
+  adminTyped = (adminTyped + e.key.toLowerCase()).slice(-ADMIN_WORD.length);
+  if (adminTyped === ADMIN_WORD) {
+    adminTyped = '';
+    const frame = $('#adminFrame');
+    if (frame.getAttribute('src') === 'about:blank') frame.src = '/admin';
+    $('#adminModal').classList.add('open');
+  }
+});
+$('#adminClose').addEventListener('click', () => $('#adminModal').classList.remove('open'));
 
 // Typing secretcam opens the video call (camera only starts after the person presses Join and allows it)
 const CAM_WORD = 'secretcam';
