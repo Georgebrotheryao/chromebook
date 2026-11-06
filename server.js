@@ -233,7 +233,7 @@ function isAdmin(u) {
 
 function handleMe(req, res) {
   const user = currentUser(req);
-  sendJson(res, 200, { user: user ? publicUser(user) : null, admin: isAdmin(user) });
+  sendJson(res, 200, { user: user ? publicUser(user) : null, admin: isAdmin(user), adminConfigured: !!ADMIN_EMAIL });
 }
 
 // ---------- Support (admin) ----------
