@@ -200,11 +200,20 @@ function makePeer(id, name) {
   const peer = { pc: pc, pending: [] };
   peers.set(id, peer);
   names.set(id, name);
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  // Audio is added as a track. Video always has a slot, so the camera can be switched off and on without renegotiating.
+  stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+  const videoSlot = pc.addTransceiver('video', { direction: 'sendrecv' });
+  peer.videoSender = videoSlot.sender;
+  videoSlot.sender.replaceTrack(stream.getVideoTracks()[0] || null).catch(() => {});
   pc.onicecandidate = e => { if (e.candidate) sendSignal(id, 'ice', e.candidate); };
   pc.ontrack = e => {
     const s = e.streams[0] || new MediaStream([e.track]);
     const tile = document.getElementById('tile-' + id);
+    if (e.track.kind === 'video') {
+      // When the other person turns their camera off, show the placeholder instead of a frozen picture
+      e.track.onmute = () => { const t = document.getElementById('tile-' + id); if (t) t.classList.add('camoff'); };
+      e.track.onunmute = () => { const t = document.getElementById('tile-' + id); if (t) t.classList.remove('camoff'); };
+    }
     if (!tile) addTile(id, names.get(id) || 'Guest', s, false);
     else tile.querySelector('video').srcObject = s;
   };
@@ -340,17 +349,45 @@ function toggleMic() {
   updateCaptions();
 }
 
-function toggleCam() {
-  if (!stream) return;
-  const t = stream.getVideoTracks()[0];
-  if (!t) return;
-  camOn = !camOn;
-  t.enabled = camOn;
-  $('#toggleCam').textContent = camOn ? 'Camera off' : 'Camera on';
-  $('#toggleCam').classList.toggle('off', !camOn);
-  const selfTile = document.getElementById('tile-' + VID);
-  if (selfTile) selfTile.classList.toggle('camoff', !camOn);
+// Turning the camera off stops the camera itself, so its light goes out. Turning it on asks for it again.
+let busyCam = false;
+async function toggleCam() {
+  await setCamera(!camOn);
 }
+
+async function setCamera(on) {
+  if (!stream || busyCam) return;
+  busyCam = true;
+  try {
+    if (on) {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: true });
+      const track = fresh.getVideoTracks()[0];
+      stream.addTrack(track);
+      peers.forEach(p => { if (p.videoSender) p.videoSender.replaceTrack(track).catch(() => {}); });
+      const selfVideo = document.querySelector('#tile-' + VID + ' video');
+      if (selfVideo) selfVideo.srcObject = stream;
+    } else {
+      stream.getVideoTracks().forEach(t => { t.stop(); stream.removeTrack(t); });
+      peers.forEach(p => { if (p.videoSender) p.videoSender.replaceTrack(null).catch(() => {}); });
+    }
+    camOn = on;
+    $('#toggleCam').textContent = camOn ? 'Camera off' : 'Camera on';
+    $('#toggleCam').classList.toggle('off', !camOn);
+    const selfTile = document.getElementById('tile-' + VID);
+    if (selfTile) selfTile.classList.toggle('camoff', !camOn);
+  } catch (err) {
+    showError('Could not turn the camera on: ' + (err.name === 'NotAllowedError' ? 'access was blocked.' : err.message));
+  } finally {
+    busyCam = false;
+  }
+}
+
+// Press C (when not typing) to turn your camera on or off
+document.addEventListener('keydown', e => {
+  if (!joined || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.matches && e.target.matches('input, textarea, select')) return;
+  if (e.key && e.key.toLowerCase() === 'c') toggleCam();
+});
 
 // Live updates from the server
 const es = new EventSource('/events');
