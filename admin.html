@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support panel</title>
+<style>
+[hidden]{display:none !important}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{height:100%;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#131722;border-bottom:1px solid #1f2330;flex-wrap:wrap}
+.title{font-weight:600;margin-right:auto}
+.note{font-size:12px;color:#8a93a8}
+input.search{height:34px;width:min(240px,100%);border-radius:17px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 14px;font:inherit;font-size:13px;outline:none}
+input.search:focus{border-color:#7c8cff}
+.denied{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#8a93a8;font-size:14px;line-height:1.5}
+.status{margin:8px 12px 0;font-size:12px;color:#8a93a8;min-height:16px}
+.status.error{color:#ff9aa4}
+.status.ok{color:#7fe9b8}
+.list{flex:1;min-height:0;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.card{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:#131722;border:1px solid #1f2330;animation:fadeUp .3s cubic-bezier(.16,1,.3,1)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.who{flex:1;min-width:180px}
+.email{font-size:12px;color:#6b7389;margin-top:2px;word-break:break-all}
+.badges{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+.badge{font-size:11px;padding:2px 8px;border-radius:10px;background:#1c2130;color:#8a93a8}
+.badge.on{background:rgba(61,220,151,.15);color:#3ddc97}
+.badge.call{background:rgba(124,140,255,.18);color:#a9b4ff}
+.actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+input.rename{height:34px;width:160px;border-radius:17px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 12px;font:inherit;font-size:13px;outline:none}
+input.rename:focus{border-color:#7c8cff}
+button{height:34px;padding:0 14px;border-radius:17px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:12px;cursor:pointer;transition:transform .12s,background .15s}
+button:hover{background:#262c3d}
+button:active{transform:scale(.96)}
+button:disabled{opacity:.4;cursor:default}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">Support panel</div>
+    <input class="search" id="search" placeholder="Search by name or email">
+    <span class="note" id="count"></span>
+  </header>
+  <div class="status" id="status"></div>
+  <div class="denied" id="denied" hidden></div>
+  <div class="list" id="list"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let users = [];
+
+function setStatus(msg, kind) {
+  $('#status').textContent = msg;
+  $('#status').className = 'status ' + (kind || '');
+}
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json().catch(() => ({ ok: false, error: 'Unexpected response' }));
+}
+
+function render() {
+  const q = $('#search').value.trim().toLowerCase();
+  const list = $('#list');
+  list.innerHTML = '';
+  const shown = users.filter(u => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  $('#count').textContent = shown.length + ' of ' + users.length + ' accounts';
+  shown.forEach(u => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const who = document.createElement('div');
+    who.className = 'who';
+    const name = document.createElement('div');
+    name.textContent = u.name;
+    name.style.fontWeight = '500';
+    const email = document.createElement('div');
+    email.className = 'email';
+    email.textContent = u.email;
+    const badges = document.createElement('div');
+    badges.className = 'badges';
+    const b1 = document.createElement('span');
+    b1.className = 'badge' + (u.online ? ' on' : '');
+    b1.textContent = u.online ? 'online' : 'offline';
+    badges.append(b1);
+    if (u.inCall) {
+      const b2 = document.createElement('span');
+      b2.className = 'badge call';
+      b2.textContent = 'in video call';
+      badges.append(b2);
+    }
+    who.append(name, email, badges);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const input = document.createElement('input');
+    input.className = 'rename';
+    input.maxLength = 24;
+    input.value = u.name;
+    input.setAttribute('aria-label', 'New name');
+    const save = document.createElement('button');
+    save.textContent = 'Save name';
+    save.addEventListener('click', async () => {
+      const d = await api('/api/admin/rename', { id: u.id, name: input.value });
+      if (!d.ok) return setStatus(d.error || 'Could not save the name.', 'error');
+      setStatus('Name changed to ' + input.value.trim() + '.', 'ok');
+      await load();
+    });
+    const camOff = document.createElement('button');
+    camOff.textContent = 'Ask to turn camera off';
+    camOff.disabled = !u.inCall;
+    camOff.addEventListener('click', async () => {
+      const d = await api('/api/admin/camera', { id: u.id, action: 'off' });
+      if (!d.ok) return setStatus(d.error || 'Could not send the request.', 'error');
+      setStatus('Asked ' + u.name + ' to turn their camera off. They can accept or ignore it.', 'ok');
+    });
+    actions.append(input, save, camOff);
+
+    card.append(who, actions);
+    list.append(card);
+  });
+}
+
+async function load() {
+  let r;
+  try {
+    r = await fetch('/api/admin/users');
+  } catch (e) {
+    $('#denied').textContent = 'Could not reach the server.';
+    $('#denied').hidden = false;
+    return;
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) {
+    $('#list').innerHTML = '';
+    let msg = 'Sign in first. Only the support account can use this panel.';
+    if (r.status === 403) {
+      const me = await (await fetch('/api/me')).json().catch(() => ({}));
+      msg = me.adminConfigured
+        ? 'Support only. This account is not the support account.'
+        : 'The support account is not set up yet. Add the variable ADMIN_EMAIL on the server with your sign-up email, then redeploy.';
+    }
+    $('#denied').textContent = msg;
+    $('#denied').hidden = false;
+    return;
+  }
+  $('#denied').hidden = true;
+  users = d.users;
+  render();
+}
+
+$('#search').addEventListener('input', render);
+load();
+</script>
+</body>
+</html>
