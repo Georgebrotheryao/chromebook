@@ -30,6 +30,8 @@ const rateLog = new Map();        // key -> [timestamps]
 const participants = new Map();   // vid -> { vid, name, uid }
 const rooms = new Map();          // game room id -> room
 const gameRate = new Map();       // user id -> [timestamps] (games allow quick taps)
+const mouseMembers = new Map();   // user id -> { uid, name, x, y, trail, seen } (people on the mouse page)
+const mouseRate = new Map();      // user id -> [timestamps]
 const clients = new Map();        // chat SSE response -> user id
 const notifyClients = new Map();  // user id -> Set of notification SSE responses
 const pendingInvites = new Map(); // user id -> [invites waiting for them to connect]
@@ -81,6 +83,7 @@ const chatHtml = loadFile('chat.html');
 const videoHtml = loadFile('video.html');
 const loginHtml = loadFile('login.html');
 const gamesHtml = loadFile('games.html');
+const mouseHtml = loadFile('mouse.html');
 const adminHtml = loadFile('admin.html');
 
 function safeWrite(res, data) {
@@ -464,6 +467,97 @@ function handleGameState(req, res, room) {
   sendJson(res, 200, { ok: true, room: roomPublic(r), log: r.log });
 }
 
+// ---------- Mouse page ----------
+const MOUSE_FX = ['ripple', 'sparkle', 'heart', 'confetti', 'rain', 'say', 'shake'];
+
+function mouseRateLimited(uid, kind, max) {
+  const key = kind + ':' + uid;
+  const now = Date.now();
+  const recent = (mouseRate.get(key) || []).filter(t => now - t < 1000);
+  const limited = recent.length >= max;
+  if (!limited) recent.push(now);
+  mouseRate.set(key, recent);
+  return limited;
+}
+
+function clamp01(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5;
+}
+
+function mouseBroadcast(ev) {
+  const payload = 'event: mouse\ndata: ' + JSON.stringify(ev) + '\n\n';
+  mouseMembers.forEach((m, uid) => {
+    const conns = notifyClients.get(uid);
+    if (conns) conns.forEach(res => safeWrite(res, payload));
+  });
+}
+
+function handleMouseJoin(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const existing = mouseMembers.get(me.id);
+    if (!existing) {
+      const m = { uid: me.id, name: me.name, x: clamp01(data.x), y: clamp01(data.y), trail: data.trail !== false, seen: Date.now() };
+      mouseMembers.set(me.id, m);
+      mouseBroadcast({ type: 'join', uid: m.uid, name: m.name, x: m.x, y: m.y, trail: m.trail });
+    } else {
+      existing.seen = Date.now();
+      existing.name = me.name;
+    }
+    const members = [...mouseMembers.values()].map(m => ({ uid: m.uid, name: m.name, x: m.x, y: m.y, trail: m.trail }));
+    sendJson(res, 200, { ok: true, members: members });
+  });
+}
+
+function handleMouseLeave(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  if (mouseMembers.delete(me.id)) mouseBroadcast({ type: 'leave', uid: me.id });
+  sendJson(res, 200, { ok: true });
+}
+
+function handleMouseMove(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const m = mouseMembers.get(me.id);
+    if (!m) return sendJson(res, 403, { ok: false, error: 'Rejoin the mouse page' });
+    if (mouseRateLimited(me.id, 'move', 25)) return sendJson(res, 429, { ok: false });
+    m.x = clamp01(data.x); m.y = clamp01(data.y); m.trail = data.trail !== false; m.seen = Date.now();
+    mouseBroadcast({ type: 'move', uid: m.uid, name: m.name, x: m.x, y: m.y, trail: m.trail });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleMouseFx(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const m = mouseMembers.get(me.id);
+    if (!m) return sendJson(res, 403, { ok: false, error: 'Rejoin the mouse page' });
+    const kind = String(data.kind || '');
+    if (!MOUSE_FX.includes(kind)) return sendJson(res, 400, { ok: false, error: 'Unknown effect' });
+    if (mouseRateLimited(me.id, 'fx', 10)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
+    const text = kind === 'say' ? String(data.text || '').trim().slice(0, 40) : '';
+    if (kind === 'say' && !text) return sendJson(res, 400, { ok: false, error: 'Type a message first' });
+    mouseBroadcast({ type: 'fx', uid: me.id, kind: kind, x: clamp01(data.x), y: clamp01(data.y), text: text });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+// People who close the page without leaving are removed after a while
+setInterval(() => {
+  const now = Date.now();
+  mouseMembers.forEach((m, uid) => {
+    if (now - m.seen > 25000) {
+      mouseMembers.delete(uid);
+      mouseBroadcast({ type: 'leave', uid: uid });
+    }
+  });
+}, 10000).unref();
+
 // Remove rooms nobody is using anymore
 setInterval(() => {
   const now = Date.now();
@@ -504,7 +598,7 @@ function handleInvite(req, res) {
   if (isRateLimited('invite:' + me.id)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
   readBody(req, res, MAX_BODY, data => {
     const kind = String(data.kind || '');
-    if (kind !== 'chat' && kind !== 'call' && kind !== 'game') return sendJson(res, 400, { ok: false, error: 'Unknown invite type' });
+    if (kind !== 'chat' && kind !== 'call' && kind !== 'game' && kind !== 'mouse') return sendJson(res, 400, { ok: false, error: 'Unknown invite type' });
     let room = null;
     if (kind === 'game') {
       room = rooms.get(String(data.room || ''));
@@ -668,6 +762,17 @@ const server = http.createServer((req, res) => {
   }
   if (get && p === '/games/state') return handleGameState(req, res, url.searchParams.get('room') || '');
   if (get && p === '/games/info') return handleGameInfo(req, res, url.searchParams.get('room') || '');
+  if (get && p === '/mouse') {
+    if (!currentUser(req)) {
+      res.writeHead(302, { 'Location': '/login?next=%2Fmouse' });
+      return res.end();
+    }
+    return sendHtml(res, mouseHtml);
+  }
+  if (post && p === '/mouse/join') return handleMouseJoin(req, res);
+  if (post && p === '/mouse/leave') return handleMouseLeave(req, res);
+  if (post && p === '/mouse/move') return handleMouseMove(req, res);
+  if (post && p === '/mouse/fx') return handleMouseFx(req, res);
   if (post && p === '/games/create') return handleGameCreate(req, res);
   if (post && p === '/games/join') return handleGameJoin(req, res);
   if (post && p === '/games/leave') return handleGameLeave(req, res);
