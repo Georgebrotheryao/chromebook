@@ -67,6 +67,7 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
     <div class="title"><span class="logo"></span>LocalChat</div>
     <span class="me" id="me"></span>
     <span class="online" id="online"></span>
+    <button id="playBtn">Play</button>
     <button id="inviteBtn">Invite</button>
     <button class="ghost" id="signout">Sign out</button>
     <div class="status busy" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
@@ -90,6 +91,18 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
       <div class="panel-foot">
         <button class="ghost" id="inviteCancel">Cancel</button>
         <button class="primary" id="inviteSend">Send invite</button>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="gamePanel" hidden>
+    <div class="panel">
+      <div class="panel-head">Play a game together</div>
+      <div class="panel-note" id="gameNote">Pick a game and the people to play with. They get an invite.</div>
+      <div style="padding:10px 16px 0"><select id="gameSelect" style="width:100%;height:38px;border-radius:12px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 10px;font:inherit"></select></div>
+      <div class="people" id="gamePeople"></div>
+      <div class="panel-foot">
+        <button class="ghost" id="gameCancel">Cancel</button>
+        <button class="primary" id="gameStart">Create game and invite</button>
       </div>
     </div>
   </div>
@@ -266,6 +279,46 @@ $('#input').addEventListener('keydown', e => {
 });
 $('#input').addEventListener('input', autosize);
 $('#clear').addEventListener('click', () => { $('#messages').innerHTML = ''; });
+const GAME_OPTIONS = [
+  ['tictactoe', 'Tic-Tac-Toe'], ['connect4', 'Connect Four'], ['rps', 'Rock Paper Scissors'],
+  ['reaction', 'Reaction Race'], ['scramble', 'Word Scramble'], ['quickmath', 'Quick Math'],
+  ['hangman', 'Hangman (team)'], ['simon', 'Simon Says'], ['doodle', 'Shared Doodle'], ['tapbattle', 'Tap Battle']
+];
+async function openGamePanel() {
+  $('#gameNote').textContent = 'Pick a game and the people to play with. They get an invite.';
+  const sel = $('#gameSelect');
+  if (!sel.options.length) GAME_OPTIONS.forEach(([v, t]) => sel.add(new Option(t, v)));
+  const box = $('#gamePeople');
+  box.innerHTML = '';
+  $('#gamePanel').hidden = false;
+  const d = await api('/api/users').catch(() => null);
+  (d && d.users ? d.users : []).forEach(u => {
+    const label = document.createElement('label');
+    label.className = 'person';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = u.id;
+    const dot = document.createElement('span');
+    dot.className = 'pdot' + (u.online ? ' on' : '');
+    const name = document.createElement('span');
+    name.className = 'pname';
+    name.textContent = u.name;
+    label.append(cb, dot, name);
+    box.append(label);
+  });
+}
+async function startGame() {
+  const game = $('#gameSelect').value;
+  const ids = [...document.querySelectorAll('#gamePeople input:checked')].map(cb => cb.value);
+  const created = await api('/games/create', { game: game });
+  if (!created.ok) return ($('#gameNote').textContent = created.error || 'Could not create the game.');
+  if (ids.length) await api('/api/invite', { kind: 'game', room: created.room, to: ids });
+  window.open('/games?room=' + encodeURIComponent(created.room), '_blank');
+  $('#gamePanel').hidden = true;
+}
+$('#playBtn').addEventListener('click', openGamePanel);
+$('#gameCancel').addEventListener('click', () => { $('#gamePanel').hidden = true; });
+$('#gameStart').addEventListener('click', startGame);
 $('#inviteBtn').addEventListener('click', openInvite);
 $('#inviteCancel').addEventListener('click', () => { $('#invitePanel').hidden = true; });
 $('#inviteSend').addEventListener('click', sendInvites);
