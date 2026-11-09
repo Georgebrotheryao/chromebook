@@ -442,6 +442,20 @@ function handleGameAct(req, res) {
   });
 }
 
+function handleGameInfo(req, res, id) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  const room = rooms.get(id);
+  if (!room) return sendJson(res, 404, { ok: false, error: 'That game room no longer exists.' });
+  sendJson(res, 200, {
+    ok: true,
+    game: GAMES[room.game].name,
+    host: room.members.get(room.host) || 'Host',
+    started: room.started,
+    full: room.members.size >= GAMES[room.game].max
+  });
+}
+
 function handleGameState(req, res, room) {
   const me = requireUser(req, res);
   if (!me) return;
@@ -653,6 +667,7 @@ const server = http.createServer((req, res) => {
     return sendHtml(res, gamesHtml);
   }
   if (get && p === '/games/state') return handleGameState(req, res, url.searchParams.get('room') || '');
+  if (get && p === '/games/info') return handleGameInfo(req, res, url.searchParams.get('room') || '');
   if (post && p === '/games/create') return handleGameCreate(req, res);
   if (post && p === '/games/join') return handleGameJoin(req, res);
   if (post && p === '/games/leave') return handleGameLeave(req, res);
