@@ -34,6 +34,10 @@ header{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#13
 .text{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
 .del-btn{display:block;margin:6px 0 0 auto;padding:2px 10px;font-size:11px;border-radius:10px;background:rgba(255,255,255,.18);border:0;color:#fff;cursor:pointer}
 .del-btn:hover{background:rgba(255,255,255,.32)}
+.gamecard{display:flex;flex-direction:column;gap:6px;min-width:200px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);margin-top:2px}
+.gc-title{font-size:13px}
+.gc-game{font-size:15px;font-weight:600}
+.gc-play{align-self:flex-start;height:30px;padding:0 14px;font-size:12px;margin-top:2px}
 .system{align-self:center;font-size:12px;color:#7d869b;background:#171b26;padding:4px 10px;border-radius:10px}
 .composer{display:flex;gap:8px;align-items:flex-end;padding:10px 12px;border-top:1px solid #1f2330;background:#131722}
 textarea{flex:1;resize:none;max-height:140px;min-height:40px;border-radius:20px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:10px 14px;font:inherit;font-size:14px;outline:none;line-height:1.4}
@@ -136,6 +140,30 @@ async function api(path, body) {
   return r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server' }));
 }
 
+function gameCard(roomId, senderName, mine) {
+  const card = document.createElement('div');
+  card.className = 'gamecard';
+  const title = document.createElement('div');
+  title.className = 'gc-title';
+  title.textContent = mine ? 'You invited people to play' : senderName + ' invited you to play';
+  const game = document.createElement('div');
+  game.className = 'gc-game';
+  game.textContent = 'a game';
+  const play = document.createElement('button');
+  play.className = 'primary gc-play';
+  play.textContent = 'Play';
+  play.addEventListener('click', () => window.open('/games?room=' + encodeURIComponent(roomId), '_blank'));
+  card.append(title, game, play);
+  fetch('/games/info?room=' + encodeURIComponent(roomId))
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) game.textContent = d.game + (d.started ? ' (in progress)' : d.full ? ' (full)' : '');
+      else { game.textContent = 'This game is closed'; play.disabled = true; }
+    })
+    .catch(() => {});
+  return card;
+}
+
 function removeMessage(id) {
   document.querySelectorAll('.row[data-id="' + id + '"]').forEach(el => el.remove());
 }
@@ -154,8 +182,19 @@ function addMessage(m) {
   meta.textContent = (mine ? 'You' : m.name) + ' · ' + fmtClock(m.ts);
   const text = document.createElement('div');
   text.className = 'text';
-  text.textContent = m.text;
-  bubble.append(meta, text);
+  // A game room link becomes a Play card
+  const gameLink = String(m.text).match(/games\?room=([0-9a-f]{6,16})/);
+  if (gameLink) {
+    const rest = String(m.text).replace(/https?:\/\/\S*games\?room=\S*/, '').replace(/\S*games\?room=\S*/, '').trim();
+    if (rest) text.textContent = rest;
+    else text.remove();
+    bubble.append(meta);
+    if (rest) bubble.append(text);
+    bubble.append(gameCard(gameLink[1], m.name, m.uid === ME.id));
+  } else {
+    text.textContent = m.text;
+    bubble.append(meta, text);
+  }
   if (mine) {
     const del = document.createElement('button');
     del.className = 'del-btn';
