@@ -71,6 +71,7 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
     <div class="title"><span class="logo"></span>LocalChat</div>
     <span class="me" id="me"></span>
     <span class="online" id="online"></span>
+    <button id="mouseBtn">Mouse page</button>
     <button id="playBtn">Play</button>
     <button id="inviteBtn">Invite</button>
     <button class="ghost" id="signout">Sign out</button>
@@ -107,6 +108,18 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:10px;pa
       <div class="panel-foot">
         <button class="ghost" id="gameCancel">Cancel</button>
         <button class="primary" id="gameStart">Create game and invite</button>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="mousePanel" hidden>
+    <div class="panel">
+      <div class="panel-head">Invite people to the mouse page</div>
+      <div class="panel-note" id="mouseNote">Pick people to invite. They get a notification to join.</div>
+      <div class="people" id="mousePeople"></div>
+      <div class="panel-foot">
+        <button class="ghost" id="mouseCancel">Cancel</button>
+        <button id="mouseOpen">Open for me</button>
+        <button class="primary" id="mouseSend">Send invite</button>
       </div>
     </div>
   </div>
@@ -356,6 +369,42 @@ async function startGame() {
   $('#gamePanel').hidden = true;
 }
 $('#playBtn').addEventListener('click', openGamePanel);
+async function openMousePanel() {
+  $('#mouseNote').textContent = 'Pick people to invite. They get a notification to join.';
+  const box = $('#mousePeople');
+  box.innerHTML = '';
+  $('#mousePanel').hidden = false;
+  let d = null;
+  try { d = await (await fetch('/api/users')).json(); } catch (e) {}
+  (d && d.users ? d.users : []).forEach(u => {
+    const label = document.createElement('label');
+    label.className = 'person';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = u.id;
+    const dot = document.createElement('span');
+    dot.className = 'pdot' + (u.online ? ' on' : '');
+    const name = document.createElement('span');
+    name.className = 'pname';
+    name.textContent = u.name;
+    label.append(cb, dot, name);
+    box.append(label);
+  });
+}
+async function sendMouseInvites() {
+  const ids = [...document.querySelectorAll('#mousePeople input:checked')].map(cb => cb.value);
+  if (!ids.length) return ($('#mouseNote').textContent = 'Pick at least one person.');
+  const d = await api('/api/invite', { kind: 'mouse', to: ids });
+  if (!d.ok) return ($('#mouseNote').textContent = d.error || 'Could not send the invite.');
+  $('#mouseNote').textContent = 'Invite sent to ' + ids.length + ' ' + (ids.length === 1 ? 'person' : 'people') + '.';
+  setTimeout(() => { $('#mousePanel').hidden = true; }, 900);
+}
+$('#mouseBtn') && $('#mouseBtn').addEventListener('click', openMousePanel);
+$('#mouseCallBtn') && $('#mouseCallBtn').addEventListener('click', openMousePanel);
+$('#mouseCancel').addEventListener('click', () => { $('#mousePanel').hidden = true; });
+$('#mouseOpen').addEventListener('click', () => window.open('/mouse', '_blank'));
+$('#mouseSend').addEventListener('click', sendMouseInvites);
+
 $('#gameCancel').addEventListener('click', () => { $('#gamePanel').hidden = true; });
 $('#gameStart').addEventListener('click', startGame);
 $('#inviteBtn').addEventListener('click', openInvite);
