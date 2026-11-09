@@ -28,6 +28,8 @@ const sessions = new Map();       // token -> id
 const loginLog = new Map();       // ip -> [timestamps]
 const rateLog = new Map();        // key -> [timestamps]
 const participants = new Map();   // vid -> { vid, name, uid }
+const rooms = new Map();          // game room id -> room
+const gameRate = new Map();       // user id -> [timestamps] (games allow quick taps)
 const clients = new Map();        // chat SSE response -> user id
 const notifyClients = new Map();  // user id -> Set of notification SSE responses
 const pendingInvites = new Map(); // user id -> [invites waiting for them to connect]
@@ -78,6 +80,7 @@ const chromebookHtml = loadFile('chromebook.html');
 const chatHtml = loadFile('chat.html');
 const videoHtml = loadFile('video.html');
 const loginHtml = loadFile('login.html');
+const gamesHtml = loadFile('games.html');
 const adminHtml = loadFile('admin.html');
 
 function safeWrite(res, data) {
@@ -319,6 +322,140 @@ function handleVideoChat(req, res) {
   });
 }
 
+// ---------- Mini games ----------
+const GAMES = {
+  tictactoe: { name: 'Tic-Tac-Toe', min: 2, max: 2 },
+  connect4: { name: 'Connect Four', min: 2, max: 2 },
+  rps: { name: 'Rock Paper Scissors', min: 2, max: 2 },
+  reaction: { name: 'Reaction Race', min: 2, max: 8 },
+  scramble: { name: 'Word Scramble', min: 2, max: 8 },
+  quickmath: { name: 'Quick Math', min: 2, max: 8 },
+  hangman: { name: 'Hangman (team)', min: 2, max: 8 },
+  simon: { name: 'Simon Says', min: 2, max: 8 },
+  doodle: { name: 'Shared Doodle', min: 1, max: 8 },
+  tapbattle: { name: 'Tap Battle', min: 2, max: 8 }
+};
+const ROOM_EVENT_LIMIT = 4000;
+const ROOM_LIFETIME_MS = 6 * 60 * 60 * 1000;
+
+function gameRateLimited(uid) {
+  const now = Date.now();
+  const recent = (gameRate.get(uid) || []).filter(t => now - t < 1000);
+  const limited = recent.length >= 25;
+  if (!limited) recent.push(now);
+  gameRate.set(uid, recent);
+  return limited;
+}
+
+function roomPublic(room) {
+  return {
+    id: room.id, game: room.game, name: GAMES[room.game].name, creator: room.creator,
+    host: room.host, min: GAMES[room.game].min, max: GAMES[room.game].max, started: room.started
+  };
+}
+
+function broadcastRoom(room, ev) {
+  const payload = 'event: gameevent\ndata: ' + JSON.stringify({ room: room.id, ev: ev }) + '\n\n';
+  room.members.forEach((name, uid) => {
+    const conns = notifyClients.get(uid);
+    if (conns) conns.forEach(res => safeWrite(res, payload));
+  });
+}
+
+// Every change to a room is added to one shared log. Each screen replays the same log, so everyone sees the same game.
+function roomEvent(room, type, uid, name, data) {
+  if (room.log.length >= ROOM_EVENT_LIMIT) return null;
+  const ev = { seq: room.log.length + 1, type: type, uid: uid, name: name, data: data || null, ts: Date.now() };
+  room.log.push(ev);
+  broadcastRoom(room, ev);
+  return ev;
+}
+
+function handleGameCreate(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const game = String(data.game || '');
+    if (!GAMES[game]) return sendJson(res, 400, { ok: false, error: 'Unknown game' });
+    const id = crypto.randomBytes(4).toString('hex');
+    const room = { id: id, game: game, creator: me.id, host: me.id, members: new Map(), started: false, log: [], created: Date.now() };
+    rooms.set(id, room);
+    room.members.set(me.id, me.name);
+    roomEvent(room, 'join', me.id, me.name, null);
+    sendJson(res, 200, { ok: true, room: id });
+  });
+}
+
+function handleGameJoin(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const room = rooms.get(String(data.room || ''));
+    if (!room) return sendJson(res, 404, { ok: false, error: 'That room no longer exists.' });
+    if (room.members.has(me.id)) return sendJson(res, 200, { ok: true });
+    if (room.members.size >= GAMES[room.game].max) return sendJson(res, 409, { ok: false, error: 'This room is full.' });
+    if (room.started) return sendJson(res, 409, { ok: false, error: 'This game has already started. Ask the host to start a new one.' });
+    room.members.set(me.id, me.name);
+    roomEvent(room, 'join', me.id, me.name, null);
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleGameLeave(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, MAX_BODY, data => {
+    const room = rooms.get(String(data.room || ''));
+    if (!room || !room.members.has(me.id)) return sendJson(res, 200, { ok: true });
+    room.members.delete(me.id);
+    if (room.members.size === 0) {
+      rooms.delete(room.id);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (room.host === me.id) room.host = room.members.keys().next().value;
+    roomEvent(room, 'leave', me.id, me.name, { host: room.host });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleGameAct(req, res) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  readBody(req, res, 16 * 1024, data => {
+    const room = rooms.get(String(data.room || ''));
+    if (!room || !room.members.has(me.id)) return sendJson(res, 403, { ok: false, error: 'You are not in this room.' });
+    const d = data.data && typeof data.data === 'object' ? data.data : null;
+    if (!d || typeof d.type !== 'string') return sendJson(res, 400, { ok: false, error: 'Bad move' });
+    if (gameRateLimited(me.id)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
+    if (d.type === 'start') {
+      if (room.started || me.id !== room.host) return sendJson(res, 409, { ok: false, error: 'Only the host can start, and only once.' });
+      if (room.members.size < GAMES[room.game].min) return sendJson(res, 409, { ok: false, error: 'Not enough players yet.' });
+      room.started = true;
+    }
+    if (d.type === 'reset') {
+      if (me.id !== room.host) return sendJson(res, 403, { ok: false, error: 'Only the host can do that.' });
+      room.started = false;
+    }
+    const ev = roomEvent(room, 'act', me.id, me.name, d);
+    if (!ev) return sendJson(res, 409, { ok: false, error: 'This game is too long. Start a new room.' });
+    sendJson(res, 200, { ok: true });
+  });
+}
+
+function handleGameState(req, res, room) {
+  const me = requireUser(req, res);
+  if (!me) return;
+  const r = rooms.get(room);
+  if (!r || !r.members.has(me.id)) return sendJson(res, 404, { ok: false, error: 'You are not in that room.' });
+  sendJson(res, 200, { ok: true, room: roomPublic(r), log: r.log });
+}
+
+// Remove rooms nobody is using anymore
+setInterval(() => {
+  const now = Date.now();
+  rooms.forEach((room, id) => { if (now - room.created > ROOM_LIFETIME_MS) rooms.delete(id); });
+}, 10 * 60 * 1000).unref();
+
 // ---------- Server ----------
 
 function handleUsers(req, res) {
@@ -353,7 +490,12 @@ function handleInvite(req, res) {
   if (isRateLimited('invite:' + me.id)) return sendJson(res, 429, { ok: false, error: 'Slow down a little' });
   readBody(req, res, MAX_BODY, data => {
     const kind = String(data.kind || '');
-    if (kind !== 'chat' && kind !== 'call') return sendJson(res, 400, { ok: false, error: 'Unknown invite type' });
+    if (kind !== 'chat' && kind !== 'call' && kind !== 'game') return sendJson(res, 400, { ok: false, error: 'Unknown invite type' });
+    let room = null;
+    if (kind === 'game') {
+      room = rooms.get(String(data.room || ''));
+      if (!room || !room.members.has(me.id)) return sendJson(res, 400, { ok: false, error: 'Create the game room first' });
+    }
     const to = Array.isArray(data.to) ? data.to.slice(0, 50).map(String) : [];
     if (!to.length) return sendJson(res, 400, { ok: false, error: 'Choose at least one person' });
     let delivered = 0;
@@ -361,6 +503,7 @@ function handleInvite(req, res) {
     to.forEach(uid => {
       if (uid === me.id || !users.has(uid)) return;
       const inv = { from: publicUser(me), kind: kind, ts: Date.now() };
+      if (room) { inv.room = room.id; inv.game = GAMES[room.game].name; }
       if (deliverInvite(uid, inv)) delivered++;
       else queued++;
     });
@@ -502,6 +645,18 @@ const server = http.createServer((req, res) => {
   if (get && p === '/chat') return sendHtml(res, chatHtml);
   if (get && p === '/video') return sendHtml(res, videoHtml);
   if (get && p === '/login') return sendHtml(res, loginHtml);
+  if (get && p === '/games') {
+    if (!currentUser(req)) {
+      res.writeHead(302, { 'Location': '/login?next=%2Fgames' });
+      return res.end();
+    }
+    return sendHtml(res, gamesHtml);
+  }
+  if (get && p === '/games/state') return handleGameState(req, res, url.searchParams.get('room') || '');
+  if (post && p === '/games/create') return handleGameCreate(req, res);
+  if (post && p === '/games/join') return handleGameJoin(req, res);
+  if (post && p === '/games/leave') return handleGameLeave(req, res);
+  if (post && p === '/games/act') return handleGameAct(req, res);
   if (get && p === '/admin') return sendHtml(res, adminHtml);
   if (get && p === '/api/admin/users') return handleAdminUsers(req, res);
   if (post && p === '/api/admin/rename') return handleAdminRename(req, res);
