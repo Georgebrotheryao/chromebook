@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini games</title>
+<style>
+[hidden]{display:none !important}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#131722;border-bottom:1px solid #1f2330;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;margin-right:auto}
+.logo{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#7c8cff,#3ddc97)}
+.roominfo{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.roomcode{font-size:12px;color:#8a93a8}
+.topstatus{margin:10px 16px 0;padding:9px 12px;border-radius:10px;font-size:13px;background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.35);color:#ff9aa4}
+.topstatus.ok{background:rgba(61,220,151,.1);border-color:rgba(61,220,151,.35);color:#7fe9b8}
+.topstatus[hidden]{display:none}
+main{flex:1;padding:18px;display:flex;flex-direction:column;align-items:center}
+.pick{width:min(860px,100%)}
+.pick h2{font-size:20px;font-weight:600;margin-bottom:6px}
+.muted{color:#8a93a8;font-size:13px;line-height:1.5;margin-bottom:16px}
+.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.gcard{background:#131722;border:1px solid #1f2330;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;animation:rise .4s cubic-bezier(.16,1,.3,1) both}
+.gcard:nth-child(2n){animation-delay:.04s}.gcard:nth-child(3n){animation-delay:.08s}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.gcard .gt{font-weight:600;font-size:15px}
+.gcard .gd{font-size:13px;color:#8a93a8;line-height:1.4;flex:1}
+.gcard .gp{font-size:11px;color:#6b7389}
+.room{width:min(860px,100%);display:flex;flex-direction:column;gap:14px}
+.roomhead{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.roomhead .gname{font-size:20px;font-weight:600}
+.roomhead .gdesc{font-size:13px;color:#8a93a8;margin-top:4px;line-height:1.4;max-width:520px}
+.members{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pill{font-size:12px;padding:4px 10px;border-radius:12px;background:#1c2130;color:#b9c3dc;animation:rise .3s both}
+.pill.host{background:rgba(124,140,255,.2);color:#c5ccff}
+.panel{background:#131722;border:1px solid #1f2330;border-radius:18px;padding:18px;min-height:280px;display:flex;flex-direction:column;gap:14px;animation:rise .35s cubic-bezier(.16,1,.3,1) both}
+.lobby-msg{color:#8a93a8;font-size:14px;line-height:1.5;text-align:center;padding:24px 0}
+.pstatus{font-size:14px;text-align:center;color:#b9c3dc;min-height:20px}
+.pstatus.big{font-size:20px;font-weight:600;color:#e7e9f0}
+.board{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+button{height:40px;padding:0 18px;border-radius:20px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:13px;cursor:pointer;transition:transform .12s,background .15s,opacity .15s}
+button:hover:not(:disabled){background:#262c3d}
+button:active:not(:disabled){transform:scale(.95)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
+button.ghost{background:transparent}
+button.big{height:90px;min-width:120px;font-size:18px;font-weight:600;border-radius:22px}
+/* Tic-tac-toe and Connect Four */
+.ttt{display:grid;grid-template-columns:repeat(3,96px);gap:8px}
+.ttt button{width:96px;height:96px;font-size:40px;font-weight:700;border-radius:16px;padding:0}
+.ttt .mark-X{color:#ff8a94}.ttt .mark-O{color:#7fb8ff}
+.c4{display:grid;grid-template-columns:repeat(7,52px);gap:6px}
+.c4 .drop{height:30px;padding:0;border-radius:10px;font-size:14px;background:transparent;border:0}
+.c4 .cell{width:52px;height:52px;border-radius:50%;background:#0c0f16;border:1px solid #1f2330;transition:background .3s}
+.c4 .cell.p0{background:#ff5d6c;border-color:#ff5d6c}
+.c4 .cell.p1{background:#f5c04a;border-color:#f5c04a}
+.rps{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.rps button{height:70px;min-width:120px;font-size:16px;font-weight:600;border-radius:18px}
+.scores{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;font-size:13px;color:#b9c3dc}
+.scores span{background:#1c2130;padding:4px 10px;border-radius:10px}
+.word{font-size:40px;font-weight:700;letter-spacing:8px;text-transform:uppercase;animation:rise .4s both}
+.sum{font-size:34px;font-weight:700;animation:rise .4s both}
+.form{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.form input{height:44px;width:min(260px,70vw);border-radius:22px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 16px;font:inherit;font-size:16px;text-align:center;outline:none}
+.form input:focus{border-color:#7c8cff}
+.hearts{font-size:22px;letter-spacing:4px}
+.alpha{display:grid;grid-template-columns:repeat(13,40px);gap:6px}
+.alpha button{width:40px;height:40px;padding:0;border-radius:12px;text-transform:uppercase;font-weight:600}
+.simon{display:grid;grid-template-columns:repeat(2,120px);gap:12px}
+.simon button{height:120px;border-radius:24px;border:0;padding:0;transition:filter .15s,transform .1s}
+.simon .red{background:#e5484d}.simon .green{background:#30a46c}.simon .blue{background:#3e63dd}.simon .yellow{background:#f5c04a}
+.simon button.lit{filter:brightness(1.7) saturate(1.2);transform:scale(1.04)}
+.simon button:disabled{opacity:.85}
+.doodle{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%}
+.doodle canvas{width:min(640px,100%);aspect-ratio:16/10;background:#fff;border-radius:14px;touch-action:none;cursor:crosshair}
+.swatches{display:flex;gap:8px;align-items:center}
+.swatch{width:28px;height:28px;border-radius:50%;padding:0;border:2px solid transparent}
+.swatch.on{border-color:#fff}
+.bars{width:min(460px,100%);display:flex;flex-direction:column;gap:8px}
+.bar{display:flex;align-items:center;gap:10px;font-size:13px}
+.bar .bn{width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .bt{flex:1;height:12px;border-radius:6px;background:#1c2130;overflow:hidden}
+.bar .bf{height:100%;background:linear-gradient(90deg,#7c8cff,#3ddc97);transition:width .2s}
+.tapbtn{width:200px;height:200px;border-radius:50%;font-size:22px;font-weight:700;background:linear-gradient(135deg,#7c8cff,#5a6df0);border:0;color:#fff;box-shadow:0 10px 40px rgba(124,140,255,.35)}
+.tapbtn:active{transform:scale(.94)}
+@media (max-width:600px){.c4{grid-template-columns:repeat(7,40px)}.c4 .cell{width:40px;height:40px}.ttt{grid-template-columns:repeat(3,84px)}.ttt button{width:84px;height:84px}.alpha{grid-template-columns:repeat(7,40px)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span class="logo"></span>Mini games</div>
+    <div class="roominfo" id="roomInfo" hidden>
+      <span class="roomcode" id="roomCode"></span>
+      <button class="ghost" id="copyLink">Copy invite link</button>
+      <button class="ghost" id="leaveBtn">Leave room</button>
+    </div>
+  </header>
+  <div class="topstatus" id="topStatus" hidden></div>
+  <main>
+    <section class="pick" id="pick" hidden>
+      <h2>Choose a game</h2>
+      <p class="muted">Create a room, then invite people from the chat or the video call. Each person joins from their own account.</p>
+      <div class="games" id="games"></div>
+    </section>
+    <section class="room" id="room" hidden>
+      <div class="roomhead">
+        <div>
+          <div class="gname" id="gName"></div>
+          <div class="gdesc" id="gDesc"></div>
+        </div>
+        <div class="members" id="members"></div>
+      </div>
+      <div class="panel" id="lobby">
+        <div class="lobby-msg" id="lobbyMsg"></div>
+        <div class="btn-row"><button class="primary" id="startBtn" hidden>Start game</button></div>
+      </div>
+      <div class="panel" id="play" hidden>
+        <div class="pstatus" id="pStatus"></div>
+        <div class="board" id="board"></div>
+        <div class="btn-row" id="playFoot"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+
+// ---------- Seeded random numbers, so every screen gets the same puzzle ----------
+function rng(seed) {
+  let x = (seed >>> 0) || 1;
+  return () => {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+}
+const pick = (arr, r) => arr[Math.floor(r() * arr.length)];
+
+// ---------- Word lists ----------
+const WORDS = ['planet','rocket','cookie','guitar','window','pencil','castle','dragon','jungle','monkey','kitchen','bicycle','blanket','thunder','ocean','mirror','pirate','rainbow','penguin','library','turtle','basket','camera','muffin','puzzle','garden','silver','shadow','island','bottle','orange','hamster','chicken','tomato','spider'];
+
+// ---------- Game logic (every screen runs the same logic on the same event log) ----------
+const GAMES_UI = {};
+
+// 1. Tic-Tac-Toe
+GAMES_UI.tictactoe = {
+  name: 'Tic-Tac-Toe', desc: 'Take turns placing X and O. Get three in a row.', min: 2, max: 2,
+  init(players) {
+    return { board: Array(9).fill(null), seats: [players[0].uid, players[1].uid], turn: 0, winSeat: null, over: false };
+  },
+  reduce(g, ev) {
+    const d = ev.data;
+    if (d.type !== 'move' || g.over) return;
+    const seat = g.seats.indexOf(ev.uid);
+    if (seat < 0 || seat !== g.turn) return;
+    const i = Number(d.i);
+    if (!Number.isInteger(i) || i < 0 || i > 8 || g.board[i]) return;
+    g.board[i] = seat === 0 ? 'X' : 'O';
+    const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    const won = lines.find(([a,b,c]) => g.board[a] && g.board[a] === g.board[b] && g.board[a] === g.board[c]);
+    if (won) { g.over = true; g.winSeat = seat; }
+    else if (g.board.every(Boolean)) { g.over = true; }
+    else g.turn = 1 - g.turn;
+  },
+  view(board, g, ctx, send) {
+    const grid = el('div', 'ttt');
+    g.board.forEach((v, i) => {
+      const c = el('button', v ? 'mark-' + v : '', v || '');
+      const myTurn = !g.over && g.seats[g.turn] === ctx.me && !v;
+      c.disabled = !myTurn;
+      c.onclick = () => send({ type: 'move', i: i });
+      grid.append(c);
+    });
+    board.append(grid);
+    const mySeat = g.seats.indexOf(ctx.me);
+    let text;
+    if (g.over) text = g.winSeat !== null ? (g.seats[g.winSeat] === ctx.me ? 'You win!' : ctx.nameOf(g.seats[g.winSeat]) + ' wins') : 'It is a draw';
+    else text = g.seats[g.turn] === ctx.me ? 'Your turn' : ctx.nameOf(g.seats[g.turn]) + "'s turn";
+    if (mySeat >= 0) text += '  (you play ' + (mySeat === 0 ? 'X' : 'O') + ')';
+    ctx.status(text, g.over);
+  }
+};
+
+// 2. Connect Four
+GAMES_UI.connect4 = {
+  name: 'Connect Four', desc: 'Drop discs into columns. Get four in a row before your opponent.', min: 2, max: 2,
+  init(players) {
+    return { board: Array(42).fill(null), seats: [players[0].uid, players[1].uid], turn: 0, winSeat: null, over: false };
+  },
+  reduce(g, ev) {
+    const d = ev.data;
+    if (d.type !== 'drop' || g.over) return;
+    const seat = g.seats.indexOf(ev.uid);
+    if (seat < 0 || seat !== g.turn) return;
+    const c = Number(d.c);
+    if (!Number.isInteger(c) || c < 0 || c > 6) return;
+    let row = -1;
+    for (let r = 5; r >= 0; r--) if (g.board[r * 7 + c] === null) { row = r; break; }
+    if (row < 0) return;
+    g.board[row * 7 + c] = seat;
+    const at = (r, cc) => (r >= 0 && r < 6 && cc >= 0 && cc < 7) ? g.board[r * 7 + cc] : undefined;
+    const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+    const win = dirs.some(([dr, dc]) => {
+      let n = 1;
+      for (const s of [1, -1]) {
+        for (let k = 1; k < 4; k++) {
+          if (at(row + dr * k * s, c + dc * k * s) === seat) n++; else break;
+        }
+      }
+      return n >= 4;
+    });
+    if (win) { g.over = true; g.winSeat = seat; }
+    else if (g.board.every(v => v !== null)) g.over = true;
+    else g.turn = 1 - g.turn;
+  },
+  view(board, g, ctx, send) {
+    const grid = el('div', 'c4');
+    for (let c = 0; c < 7; c++) {
+      const full = g.board[c] === null;
+      const b = el('button', 'drop', '▼');
+      const myTurn = !g.over && g.seats[g.turn] === ctx.me;
+      b.disabled = !myTurn || !full;
+      b.onclick = () => send({ type: 'drop', c: c });
+      grid.append(b);
+    }
+    for (let r = 0; r < 6; r++) for (let c = 0; c < 7; c++) {
+      const v = g.board[r * 7 + c];
+      grid.append(el('div', 'cell' + (v === 0 ? ' p0' : v === 1 ? ' p1' : '')));
+    }
+    board.append(grid);
+    const mySeat = g.seats.indexOf(ctx.me);
+    let text;
+    if (g.over) text = g.winSeat !== null ? (g.seats[g.winSeat] === ctx.me ? 'You win!' : ctx.nameOf(g.seats[g.winSeat]) + ' wins') : 'It is a draw';
+    else text = g.seats[g.turn] === ctx.me ? 'Your turn' : ctx.nameOf(g.seats[g.turn]) + "'s turn";
+    if (mySeat >= 0) text += '  (you are ' + (mySeat === 0 ? 'red' : 'yellow') + ')';
+    ctx.status(text, g.over);
+  }
+};
+
+// 3. Rock Paper Scissors, best of five
+GAMES_UI.rps = {
+  name: 'Rock Paper Scissors', desc: 'Best of five. Both players pick, then the round is revealed.', min: 2, max: 2,
+  init(players) {
+    return { seats: [players[0].uid, players[1].uid], picks: {}, score: [0, 0], last: null, over: false, winSeat: null };
+  },
+  reduce(g, ev) {
+    const d = ev.data;
+    if (d.type !== 'pick' || g.over) return;
+    const seat = g.seats.indexOf(ev.uid);
+    if (seat < 0 || g.picks[seat]) return;
+    if (!['rock', 'paper', 'scissors'].includes(d.p)) return;
+    g.picks[seat] = d.p;
+    if (g.picks[0] && g.picks[1]) {
+      const a = g.picks[0], b = g.picks[1];
+      const beats = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
+      let res = -1;
+      if (beats[a] === b) res = 0; else if (beats[b] === a) res = 1;
+      if (res >= 0) g.score[res]++;
+      g.last = { a: a, b: b, res: res };
+      g.picks = {};
+      if (g.score[0] >= 3 || g.score[1] >= 3) { g.over = true; g.winSeat = g.score[0] > g.score[1] ? 0 : 1; }
+    }
+  },
+  view(board, g, ctx, send) {
+    const mySeat = g.seats.indexOf(ctx.me);
+    const row = el('div', 'rps');
+    ['rock', 'paper', 'scissors'].forEach(p => {
+      const b = el('button', 'primary', p[0].toUpperCase() + p.slice(1));
+      b.disabled = g.over || mySeat < 0 || !!g.picks[mySeat];
+      b.onclick = () => send({ type: 'pick', p: p });
+      row.append(b);
+    });
+    board.append(row);
+    const sc = el('div', 'scores');
+    g.seats.forEach((uid, i) => sc.append(el('span', '', ctx.nameOf(uid) + ': ' + g.score[i])));
+    board.append(sc);
+    if (g.last) {
+      const cap = ['Tie', 'Point to ' + ctx.nameOf(g.seats[0]), 'Point to ' + ctx.nameOf(g.seats[1])][g.last.res + 1];
+      board.append(el('div', 'muted', 'Last round: ' + g.last.a + ' vs ' + g.last.b + ' — ' + cap));
+    }
+    let text;
+    if (g.over) text = ctx.nameOf(g.seats[g.winSeat]) + ' wins the match';
+    else if (mySeat >= 0 && g.picks[mySeat]) text = 'Waiting for the other player…';
+    else text = 'Pick rock, paper or scissors';
+    ctx.status(text, g.over);
+  }
+};
+
+// 4. Reaction Race
+GAMES_UI.reaction = {
+  name: 'Reaction Race', desc: 'Wait for the green. Click the moment it appears. Fastest wins the round. Three rounds.', min: 2, max: 8,
+  init() {
+    return { round: 1, rounds: 3, ready: false, go: false, goTs: 0, early: {}, tapped: {}, times: {}, score: {}, lastRound: null, over: false, winner: null };
+  },
+  reduce(g, ev, S) {
+    const d = ev.data;
+    if (g.over) return;
+    if (d.type === 'ready') {
+      if (g.ready || g.go) return;
+      g.ready = true; g.early = {}; g.tapped = {}; g.times = {};
+    } else if (d.type === 'go') {
+      if (!g.ready || g.go) return;
+      g.go = true; g.goTs = ev.ts;
+    } else if (d.type === 'tap') {
+      if (!g.ready || g.early[ev.uid] || g.tapped[ev.uid]) return;
+      if (!g.go) g.early[ev.uid] = true;
+      else { g.tapped[ev.uid] = true; g.times[ev.uid] = ev.ts - g.goTs; }
+      const done = Object.keys(g.early).length + Object.keys(g.tapped).length;
+      if (g.go && done >= S.players.length) endRound(g, S);
+      if (!g.go && done >= S.players.length) { g.ready = false; g.lastRound = { early: g.early, times: {} }; }
+    }
+  },
+  view(board, g, ctx, send, state) {
+    const mine = g.early[ctx.me] || g.tapped[ctx.me];
+    if (g.over) {
+      const top = Object.entries(g.score).sort((a, b) => b[1] - a[1]);
+      const ok = top.length && (top.length === 1 || top[0][1] !== top[1][1]);
+      board.append(el('div', 'sum', ok ? ctx.nameOf(top[0][0]) + ' wins!' : 'A tie!'));
+      board.append(el('div', 'scores', ''));
+      const sc = board.lastChild;
+      ctx.players.forEach(p => sc.append(el('span', '', p.name + ': ' + (g.score[p.uid] || 0))));
+      ctx.status('Game over', true);
+      return;
+    }
+    if (!g.ready) {
+      ctx.status('Round ' + g.round + ' of ' + g.rounds, false);
+      if (ctx.me === ctx.host) {
+        const b = el('button', 'primary big', 'Start round');
+        b.onclick = () => send({ type: 'ready' });
+        board.append(b);
+      } else board.append(el('div', 'lobby-msg', 'Waiting for the host to start the round…'));
+    } else if (!g.go) {
+      ctx.status(mine ? 'Too early! Wait for it…' : 'Wait for green…', false);
+      const b = el('button', 'big', 'Wait…');
+      b.style.background = '#e5484d';
+      b.style.borderColor = '#e5484d';
+      b.style.color = '#fff';
+      b.onclick = () => { if (!mine) send({ type: 'tap' }); };
+      board.append(b);
+      if (ctx.me === ctx.host && state.goScheduledRound !== g.round) {
+        state.goScheduledRound = g.round;
+        setTimeout(() => send({ type: 'go' }), 1500 + Math.random() * 3000);
+      }
+    } else {
+      const b = el('button', 'big', mine ? 'Clicked!' : 'CLICK!');
+      b.style.background = '#30a46c';
+      b.style.borderColor = '#30a46c';
+      b.style.color = '#fff';
+      b.disabled = !!mine;
+      b.onclick = () => send({ type: 'tap' });
+      board.append(b);
+      ctx.status(mine ? 'Your time: ' + g.times[ctx.me] + ' ms. Waiting for the others…' : 'Click now!', false);
+    }
+    if (g.lastRound && !g.ready) {
+      const t = Object.entries(g.lastRound.times).sort((a, b) => a[1] - b[1]);
+      if (t.length) board.append(el('div', 'muted', 'Last round: ' + t.map(([u, ms]) => ctx.nameOf(u) + ' ' + ms + ' ms').join(', ')));
+    }
+  }
+};
+function endRound(g, S) {
+  const t = Object.entries(g.times);
+  let winner = null;
+  if (t.length) {
+    winner = t.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
+    g.score[winner] = (g.score[winner] || 0) + 1;
+  }
+  g.lastRound = { times: g.times, early: g.early, winner: winner };
+  g.ready = false; g.go = false;
+  g.round++;
+  if (g.round > g.rounds) {
+    g.over = true;
+  }
+}
+
+// 5 and 6. Word Scramble and Quick Math: first correct answer wins each round
+function raceGame(kind) {
+  return {
+    init(players, seed) {
+      const r = rng(seed);
+      return { seed: seed, base: Math.floor(r() * WORDS.length), round: 0, rounds: kind === 'scramble' ? 6 : 8, score: {}, lastWinner: null, lastAnswer: null, over: false };
+    },
+    reduce(g, ev) {
+      const d = ev.data;
+      if (g.over) return;
+      if (kind === 'scramble' && d.type === 'guess') {
+        if (String(d.text || '').trim().toLowerCase() !== answerOf(g)) return;
+      } else if (kind === 'quickmath' && d.type === 'answer') {
+        if (Number(d.n) !== answerOf(g)) return;
+      } else return;
+      g.score[ev.uid] = (g.score[ev.uid] || 0) + 1;
+      g.lastWinner = ev.uid;
+      g.lastAnswer = answerOf(g);
+      g.round++;
+      if (g.round >= g.rounds) g.over = true;
+    },
+    view(board, g, ctx, send) {
+      const q = questionOf(g);
+      if (kind === 'scramble') {
+        board.append(el('div', 'word', q));
+        const f = el('div', 'form');
+        const input = el('input');
+        input.placeholder = 'Type the word';
+        input.maxLength = 20;
+        const btn = el('button', 'primary', 'Submit');
+        const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ''; send({ type: 'guess', text: t }); };
+        btn.onclick = submit;
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+        f.append(input, btn);
+        board.append(f);
+        if (g.over) f.hidden = true;
+      } else {
+        board.append(el('div', 'sum', q + ' = ?'));
+        const f = el('div', 'form');
+        const input = el('input');
+        input.type = 'number';
+        input.placeholder = 'Answer';
+        const btn = el('button', 'primary', 'Submit');
+        const submit = () => { const t = input.value.trim(); if (t === '') return; input.value = ''; send({ type: 'answer', n: Number(t) }); };
+        btn.onclick = submit;
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+        f.append(input, btn);
+        board.append(f);
+        if (g.over) f.hidden = true;
+      }
+      const sc = el('div', 'scores');
+      ctx.players.forEach(p => sc.append(el('span', '', p.name + ': ' + (g.score[p.uid] || 0))));
+      board.append(sc);
+      let line = 'Round ' + Math.min(g.round + 1, g.rounds) + ' of ' + g.rounds;
+      if (g.lastWinner && !g.over) line += '  •  last point: ' + ctx.nameOf(g.lastWinner);
+      ctx.status(g.over ? 'Game over' : line, g.over);
+      if (g.over) {
+        const top = Object.entries(g.score).sort((a, b) => b[1] - a[1]);
+        const tie = top.length > 1 && top[0][1] === top[1][1];
+        board.append(el('div', 'muted', tie ? 'It is a tie!' : ctx.nameOf(top[0][0]) + ' wins!'));
+      }
+    }
+  };
+}
+function raceRound(g, kind) { return g.round; }
+function scrambled(word, seed) {
+  const r = rng(seed);
+  for (let t = 0; t < 20; t++) {
+    const a = word.split('');
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    if (a.join('') !== word) return a.join('');
+  }
+  return word.split('').reverse().join('');
+}
+function wordOf(g) { return WORDS[(g.base + g.round * 7) % WORDS.length]; }
+function answerOf(g) {
+  if (g.kind === 'quickmath') return quickProblem(g).ans;
+  return wordOf(g);
+}
+function quickProblem(g) {
+  const r = rng(g.seed + g.round * 977 + 13);
+  const a = 2 + Math.floor(r() * 11), b = 2 + Math.floor(r() * 11);
+  const op = pick(['+', '-', '×'], r);
+  if (op === '+') return { q: a + ' + ' + b, ans: a + b };
+  if (op === '-') { const hi = Math.max(a, b), lo = Math.min(a, b); return { q: hi + ' − ' + lo, ans: hi - lo }; }
+  return { q: a + ' × ' + b, ans: a * b };
+}
+function questionOf(g) {
+  if (g.kind === 'quickmath') return quickProblem(g).q;
+  if (g.round >= g.rounds) return '—';
+  return scrambled(wordOf(g), g.seed + g.round * 131).toUpperCase();
+}
+GAMES_UI.scramble = raceGame('scramble');
+GAMES_UI.quickmath = raceGame('quickmath');
+GAMES_UI.scramble.init = (players, seed) => { const g = raceGame('scramble').init(players, seed); g.kind = 'scramble'; return g; };
+GAMES_UI.quickmath.init = (players, seed) => { const g = raceGame('quickmath').init(players, seed); g.kind = 'quickmath'; return g; };
+GAMES_UI.scramble.name = 'Word Scramble';
+GAMES_UI.scramble.desc = 'Unscramble the word first. Six words, one point each.';
+GAMES_UI.scramble.min = 2; GAMES_UI.scramble.max = 8;
+GAMES_UI.quickmath.name = 'Quick Math';
+GAMES_UI.quickmath.desc = 'Solve the sum first. Eight sums, one point each.';
+GAMES_UI.quickmath.min = 2; GAMES_UI.quickmath.max = 8;
+
+// 7. Hangman, working together
+const HANG_WORDS = ['planet','rocket','cookie','guitar','window','pencil','castle','dragon','jungle','monkey','kitchen','bicycle','blanket','thunder','ocean','mirror','pirate','rainbow','penguin','library','turtle','basket','camera','muffin','puzzle','garden','silver','shadow','island','bottle'];
+GAMES_UI.hangman = {
+  name: 'Hangman (team)', desc: 'Everyone guesses letters together. Six wrong guesses and the team loses.', min: 2, max: 8,
+  init(players, seed) {
+    const r = rng(seed);
+    return { word: pick(HANG_WORDS, r), guessed: [], lives: 6, over: false, won: false };
+  },
+  reduce(g, ev) {
+    const d = ev.data;
+    if (g.over || d.type !== 'letter') return;
+    const l = String(d.l || '').toLowerCase();
+    if (!/^[a-z]$/.test(l) || g.guessed.includes(l)) return;
+    g.guessed.push(l);
+    if (!g.word.includes(l)) g.lives--;
+    if (g.word.split('').every(c => g.guessed.includes(c))) { g.over = true; g.won = true; }
+    else if (g.lives <= 0) g.over = true;
+  },
+  view(board, g, ctx, send) {
+    const shown = g.word.split('').map(c => (g.over || g.guessed.includes(c)) ? c : '_').join(' ');
+    board.append(el('div', 'word', shown.toUpperCase()));
+    board.append(el('div', 'hearts', '♥'.repeat(Math.max(0, g.lives)) + '♡'.repeat(6 - Math.max(0, g.lives))));
+    const alpha = el('div', 'alpha');
+    'abcdefghijklmnopqrstuvwxyz'.split('').forEach(l => {
+      const b = el('button', '', l);
+      b.disabled = g.over || g.guessed.includes(l);
+      b.onclick = () => send({ type: 'letter', l: l });
+      alpha.append(b);
+    });
+    board.append(alpha);
+    ctx.status(g.over ? (g.won ? 'You got it together!' : 'Out of lives. The word was ' + g.word + '.') : 'Guess a letter, together', g.over);
+  }
+};
+
+// 8. Simon Says, last one standing
+const SIMON_COLORS = ['red', 'green', 'blue', 'yellow'];
+GAMES_UI.simon = {
+  name: 'Simon Says', desc: 'Repeat the colour pattern. Each round adds one more colour. A wrong press puts you out.', min: 2, max: 8,
+  init(players, seed) {
+    const first = Math.floor(rng(seed)() * 4);
+    return { seed: seed, seq: [first], progress: {}, alive: players.map(p => p.uid), over: false, winner: null, drawn: false };
+  },
+  reduce(g, ev) {
+    const d = ev.data;
+    if (g.over || d.type !== 'press') return;
+    if (!g.alive.includes(ev.uid)) return;
+    const c = Number(d.c);
+    const pos = g.progress[ev.uid] || 0;
+    if (c !== g.seq[pos]) {
+      g.alive = g.alive.filter(u => u !== ev.uid);
+      if (g.alive.length === 0) { g.over = true; g.drawn = true; }
+      else if (g.alive.length === 1) { g.over = true; g.winner = g.alive[0]; }
+      return;
+    }
+    g.progress[ev.uid] = pos + 1;
+    const everyoneDone = g.alive.every(u => (g.progress[u] || 0) === g.seq.length);
+    if (everyoneDone) {
+      const r = rng(g.seed + g.seq.length * 7919);
+      g.seq.push(Math.floor(r() * 4));
+      g.progress = {};
+    }
+  },
+  view(board, g, ctx, send) {
+    const grid = el('div', 'simon');
+    const buttons = SIMON_COLORS.map((name, i) => {
+      const b = el('button', name);
+      const mine = g.alive.includes(ctx.me);
+      const done = (g.progress[ctx.me] || 0) === g.seq.length;
+      b.disabled = g.over || !mine || done;
+      b.onclick = () => send({ type: 'press', c: i });
+      grid.append(b);
+      return b;
+    });
+    board.append(grid);
+    const shown = el('div', 'muted', 'Pattern length: ' + g.seq.length);
+    board.append(shown);
+    // Flash the pattern each time it grows
+    const key = 'simon-' + g.seed + '-' + g.seq.length;
+    if (ctx.state.simonFlashKey !== key) {
+      ctx.state.simonFlashKey = key;
+      ctx.state.simonTimers = (ctx.state.simonTimers || []).filter(Boolean);
+      g.seq.forEach((c, i) => {
+        const t1 = setTimeout(() => { buttons[c].classList.add('lit'); }, 400 + i * 600);
+        const t2 = setTimeout(() => { buttons[c].classList.remove('lit'); }, 400 + i * 600 + 350);
+        ctx.state.simonTimers.push(t1, t2);
+      });
+    }
+    if (g.over) {
+      const txt = g.drawn ? 'Everyone got it wrong!' : (g.winner === ctx.me ? 'You are the last one standing!' : ctx.nameOf(g.winner) + ' is the last one standing');
+      ctx.status(txt, true);
+    } else if (!g.alive.includes(ctx.me)) ctx.status('You are out. Watch the others.', false);
+    else if ((g.progress[ctx.me] || 0) === g.seq.length) ctx.status('Good. Waiting for the others…', false);
+    else ctx.status('Your turn to repeat: ' + (g.progress[ctx.me] || 0) + ' of ' + g.seq.length, false);
+  }
+};
+
+// 9. Shared Doodle
+GAMES_UI.doodle = {
+  name: 'Shared Doodle', desc: 'Everyone draws on the same canvas. The host can clear it.', min: 1, max: 8,
+  init() { return { strokes: [], over: false }; },
+  reduce(g, ev, S) {
+    const d = ev.data;
+    if (d.type === 'stroke') {
+      if (!Array.isArray(d.pts) || d.pts.length < 1 || d.pts.length > 400) return;
+      g.strokes.push({ pts: d.pts, color: String(d.color || '#222'), w: Math.min(12, Math.max(1, Number(d.w) || 3)) });
+      if (g.strokes.length > 600) g.strokes.shift();
+    } else if (d.type === 'clear' && ev.uid === S.host) {
+      g.strokes = [];
+    }
+  },
+  view(board, g, ctx, send) {
+    const wrap = el('div', 'doodle');
+    const palette = el('div', 'swatches');
+    const colours = ['#222222', '#e5484d', '#f5a524', '#30a46c', '#3e63dd', '#8e4ec6', '#ffffff'];
+    let colour = colours[0];
+    const swatches = colours.map(c => {
+      const s = el('button', 'swatch');
+      s.style.background = c;
+      if (c === colour) s.classList.add('on');
+      s.onclick = () => { colour = c; swatches.forEach(x => x.classList.remove('on')); s.classList.add('on'); };
+      palette.append(s);
+      return s;
+    });
+    if (ctx.me === ctx.host) {
+      const clr = el('button', 'ghost', 'Clear canvas');
+      clr.onclick = () => send({ type: 'clear' });
+      palette.append(clr);
+    }
+    const canvas = el('canvas');
+    canvas.width = 800; canvas.height = 500;
+    const c2 = canvas.getContext('2d');
+    const draw = (s) => {
+      c2.strokeStyle = s.color; c2.lineWidth = s.w * 2; c2.lineCap = 'round'; c2.lineJoin = 'round';
+      c2.beginPath();
+      s.pts.forEach(([x, y], i) => { if (i === 0) c2.moveTo(x, y); else c2.lineTo(x, y); });
+      if (s.pts.length === 1) c2.lineTo(s.pts[0][0] + 0.1, s.pts[0][1]);
+      c2.stroke();
+    };
+    const redraw = () => {
+      c2.fillStyle = '#fff'; c2.fillRect(0, 0, canvas.width, canvas.height);
+      g.strokes.forEach(draw);
+    };
+    redraw();
+    let cur = null;
+    const pos = e => {
+      const r = canvas.getBoundingClientRect();
+      return [Math.round((e.clientX - r.left) * canvas.width / r.width), Math.round((e.clientY - r.top) * canvas.height / r.height)];
+    };
+    canvas.addEventListener('pointerdown', e => {
+      cur = { pts: [pos(e)], color: colour, w: 3 };
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!cur) return;
+      const p = pos(e);
+      const last = cur.pts[cur.pts.length - 1];
+      if (last[0] === p[0] && last[1] === p[1]) return;
+      cur.pts.push(p);
+      draw({ pts: [last, p], color: cur.color, w: cur.w });
+    });
+    const end = () => {
+      if (!cur) return;
+      const s = cur; cur = null;
+      if (s.pts.length) send({ type: 'stroke', pts: s.pts.slice(0, 400), color: s.color, w: s.w });
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    wrap.append(palette, canvas);
+    board.append(wrap);
+    ctx.status('Draw together. Strokes show for everyone.', false);
+  }
+};
+
+// 10. Tap Battle
+GAMES_UI.tapbattle = {
+  name: 'Tap Battle', desc: 'Tap as fast as you can. First to 40 taps wins.', min: 2, max: 8,
+  init() { return { taps: {}, target: 40, over: false, winner: null }; },
+  reduce(g, ev) {
+    if (g.over || ev.data.type !== 'tap') return;
+    g.taps[ev.uid] = (g.taps[ev.uid] || 0) + 1;
+    if (g.taps[ev.uid] >= g.target) { g.over = true; g.winner = ev.uid; }
+  },
+  view(board, g, ctx, send) {
+    const btn = el('button', 'tapbtn', g.over ? 'Done' : 'TAP');
+    btn.disabled = g.over;
+    btn.onclick = () => send({ type: 'tap' });
+    board.append(btn);
+    const bars = el('div', 'bars');
+    ctx.players.forEach(p => {
+      const n = g.taps[p.uid] || 0;
+      const row = el('div', 'bar');
+      row.append(el('span', 'bn', p.name + (p.uid === ctx.me ? ' (you)' : '')));
+      const track = el('div', 'bt');
+      const fill = el('div', 'bf');
+      fill.style.width = Math.min(100, (n / g.target) * 100) + '%';
+      track.append(fill);
+      row.append(track, el('span', '', String(n)));
+      bars.append(row);
+    });
+    board.append(bars);
+    ctx.status(g.over ? (g.winner === ctx.me ? 'You win!' : ctx.nameOf(g.winner) + ' wins!') : 'First to ' + g.target + ' taps', g.over);
+  }
+};
+
+// ---------- Room state ----------
+let ROOM = null;      // { id, game, creator, min, max, ... }
+let ME = null;
+let S = null;         // game state for this room (built from the event log)
+let LOG = [];
+let lastSeq = 0;
+let loaded = false;
+let pendingEvents = [];
+const uiState = { goScheduledRound: 0, simonFlashKey: '', simonTimers: [] };
+
+function freshState(creator) {
+  return { players: [], host: creator, started: false, seed: 0, g: null, abandoned: false };
+}
+
+function applyEvent(ev) {
+  const G = GAMES_UI[ROOM.game];
+  if (ev.type === 'join') {
+    const existing = S.players.find(p => p.uid === ev.uid);
+    if (existing) existing.name = ev.name;
+    else S.players.push({ uid: ev.uid, name: ev.name });
+    return;
+  }
+  if (ev.type === 'leave') {
+    S.players = S.players.filter(p => p.uid !== ev.uid);
+    if (ev.data && ev.data.host) S.host = ev.data.host;
+    if (S.started && S.players.length < G.min) S.abandoned = true;
+    return;
+  }
+  if (ev.type !== 'act') return;
+  const d = ev.data || {};
+  if (d.type === 'start') {
+    if (!S.started && ev.uid === S.host && S.players.length >= G.min) {
+      S.started = true;
+      S.seed = (Number(d.seed) >>> 0) || 1;
+      S.abandoned = false;
+      S.g = G.init(S.players.slice(0, G.max), S.seed);
+      if (ROOM.game === 'scramble' || ROOM.game === 'quickmath') S.g.kind = ROOM.game;
+    }
+    return;
+  }
+  if (d.type === 'reset') {
+    if (S.started && ev.uid === S.host && ((S.g && S.g.over) || S.abandoned)) {
+      S.started = false; S.g = null; S.abandoned = false;
+    }
+    return;
+  }
+  if (S.started && S.g && !S.g.over && !S.abandoned) {
+    const sg = S.g;
+    G.reduce(sg, ev, S);
+    if (ROOM.game === 'reaction' && sg.over) S.g = sg;
+  }
+}
+
+// ---------- Rendering ----------
+function nameOf(uid) {
+  const p = S && S.players.find(x => x.uid === uid);
+  return p ? p.name : 'Player';
+}
+function setTop(msg, ok) {
+  const t = $('#topStatus');
+  t.textContent = msg || '';
+  t.className = 'topstatus' + (ok ? ' ok' : '');
+  t.hidden = !msg;
+  if (msg && ok) setTimeout(() => { if (t.textContent === msg) t.hidden = true; }, 2500);
+}
+
+function render() {
+  if (!ROOM || !S) return;
+  const G = GAMES_UI[ROOM.game];
+  $('#room').hidden = false;
+  $('#pick').hidden = true;
+  $('#roomInfo').hidden = false;
+  $('#roomCode').textContent = 'Room ' + ROOM.id;
+  $('#gName').textContent = G.name;
+  $('#gDesc').textContent = G.desc + ' (' + G.min + (G.max > G.min ? '–' + G.max : '') + ' players)';
+
+  const members = $('#members');
+  members.innerHTML = '';
+  S.players.forEach(p => {
+    const pill = el('span', 'pill' + (p.uid === S.host ? ' host' : ''), p.name + (p.uid === S.host ? ' · host' : ''));
+    members.append(pill);
+  });
+
+  const isHost = ME && S.host === ME.id;
+  if (!S.started) {
+    $('#lobby').hidden = false;
+    $('#play').hidden = true;
+    const enough = S.players.length >= G.min;
+    $('#lobbyMsg').textContent = !enough
+      ? 'Waiting for players. ' + S.players.length + ' of ' + G.min + ' needed. Invite people from the chat or the video call.'
+      : (isHost ? 'Everyone here? Press start when you are ready.' : 'Waiting for the host to start the game.');
+    const sb = $('#startBtn');
+    sb.hidden = !isHost;
+    sb.disabled = !enough;
+    return;
+  }
+
+  $('#lobby').hidden = true;
+  $('#play').hidden = false;
+  const board = $('#board');
+  board.innerHTML = '';
+  const foot = $('#playFoot');
+  foot.innerHTML = '';
+  $('#pStatus').textContent = '';
+  const ctx = {
+    me: ME ? ME.id : '', host: S.host, players: S.players, nameOf: nameOf,
+    state: uiState, stateKey: String(LOG.length),
+    status: (text, big) => { const p = $('#pStatus'); p.textContent = text; p.className = 'pstatus' + (big ? ' big' : ''); }
+  };
+  if (S.abandoned) {
+    ctx.status('Someone left, so the game cannot continue.', false);
+  } else if (S.g) {
+    try {
+      G.view(board, S.g, ctx, send, uiState);
+    } catch (e) {
+      console.error(e);
+      ctx.status('Something went wrong showing this game.', false);
+    }
+  }
+  const over = (S.g && S.g.over) || S.abandoned;
+  if (over && isHost) {
+    const again = el('button', 'primary', S.abandoned ? 'Back to lobby' : 'Play again');
+    again.onclick = () => send({ type: 'reset' });
+    foot.append(again);
+  }
+}
+
+// ---------- Server calls ----------
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json().catch(() => ({ ok: false, error: 'Unexpected response' }));
+}
+
+async function send(data) {
+  if (!ROOM) return;
+  const d = await post('/games/act', { room: ROOM.id, data: data }).catch(() => ({ ok: false, error: 'Could not reach the server.' }));
+  if (!d.ok) setTop(d.error || 'Could not send that.', false);
+}
+
+function onEvent(ev) {
+  if (!ROOM || !loaded) return;
+  if (ev.seq <= lastSeq) return;
+  if (ev.seq !== lastSeq + 1) { loadState(); return; }
+  LOG.push(ev);
+  lastSeq = ev.seq;
+  applyEvent(ev);
+  render();
+}
+
+async function loadState() {
+  const id = ROOM ? ROOM.id : new URLSearchParams(location.search).get('room');
+  const r = await fetch('/games/state?room=' + encodeURIComponent(id));
+  const d = await r.json().catch(() => ({ ok: false }));
+  if (!d.ok) { setTop(d.error || 'Could not load the room.', false); return; }
+  ROOM = d.room;
+  S = freshState(ROOM.creator);
+  LOG = d.log;
+  LOG.forEach(applyEvent);
+  lastSeq = LOG.length ? LOG[LOG.length - 1].seq : 0;
+  loaded = true;
+  const queued = pendingEvents; pendingEvents = [];
+  queued.forEach(onEvent);
+  render();
+}
+
+async function joinRoom(id) {
+  ROOM = { id: id };
+  const d = await post('/games/join', { room: id });
+  if (!d.ok) {
+    setTop(d.error || 'Could not join this room.', false);
+    $('#pick').hidden = false;
+    renderPicker();
+    return;
+  }
+  await loadState();
+}
+
+function renderPicker() {
+  $('#pick').hidden = false;
+  $('#room').hidden = true;
+  const grid = $('#games');
+  if (grid.children.length) return;
+  Object.keys(GAMES_UI).forEach(key => {
+    const g = GAMES_UI[key];
+    const card = el('div', 'gcard');
+    card.append(el('div', 'gt', g.name), el('div', 'gd', g.desc), el('div', 'gp', g.min + (g.max > g.min ? '–' + g.max : '') + ' players'));
+    const b = el('button', 'primary', 'Create room');
+    b.onclick = async () => {
+      const d = await post('/games/create', { game: key });
+      if (!d.ok) return setTop(d.error || 'Could not create the room.', false);
+      location.href = '/games?room=' + encodeURIComponent(d.room);
+    };
+    card.append(b);
+    grid.append(card);
+  });
+}
+
+// ---------- Start ----------
+$('#startBtn').addEventListener('click', () => send({ type: 'start', seed: Math.floor(Math.random() * 2147483646) + 1 }));
+$('#leaveBtn').addEventListener('click', async () => {
+  if (!ROOM) return;
+  await post('/games/leave', { room: ROOM.id });
+  location.href = '/games';
+});
+$('#copyLink').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(location.href); setTop('Invite link copied.', true); }
+  catch (e) { setTop('Copy this link from the address bar.', false); }
+});
+
+const es = new EventSource('/notify');
+es.addEventListener('gameevent', e => {
+  const d = JSON.parse(e.data);
+  if (!ROOM || d.room !== ROOM.id) return;
+  if (!loaded) { pendingEvents.push(d.ev); return; }
+  onEvent(d.ev);
+});
+
+(async function init() {
+  let me;
+  try { me = await (await fetch('/api/me')).json(); } catch (e) { setTop('Could not reach the server.', false); return; }
+  if (!me.user) { location.href = '/login?next=' + encodeURIComponent('/games' + location.search); return; }
+  ME = me.user;
+  const roomId = new URLSearchParams(location.search).get('room');
+  if (roomId) {
+    await joinRoom(roomId);
+  } else {
+    renderPicker();
+  }
+})();
+</script>
+</body>
+</html>
