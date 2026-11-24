@@ -171,6 +171,9 @@ button{font-family:inherit}
 .mouse-close:hover{background:rgba(40,46,62,.9)}
 .browser-modal{position:fixed;inset:0;z-index:135;display:none;background:#000}
 .browser-modal.open{display:block;animation:fadeIn .2s ease}
+.mobile-bar{position:absolute;top:0;left:0;right:0;height:40px;background:#202124;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 10px}
+.mobile-bar a,.mobile-bar button{background:#3c4043;color:#e8eaed;border:0;border-radius:6px;padding:6px 12px;font:13px sans-serif;cursor:pointer;text-decoration:none}
+#mobileModal iframe{position:absolute;top:40px;height:calc(100% - 40px)}
 .browser-modal iframe{width:100%;height:100%;border:0;display:block}
 /* Invite notifications */
 .toasts{position:fixed;top:16px;right:16px;z-index:200;display:flex;flex-direction:column;gap:10px;pointer-events:none}
@@ -630,6 +633,11 @@ button{font-family:inherit}
   <iframe id="browserFrame" title="Browser" src="about:blank"></iframe>
 </div>
 
+<div id="mobileModal" class="browser-modal">
+  <div class="mobile-bar"><a href="/mobile" target="_blank" rel="noopener">Open in new tab</a><button id="mobileClose">Close</button></div>
+  <iframe id="mobileFrame" title="Android" src="about:blank"></iframe>
+</div>
+
 <div id="camModal" class="chat-overlay">
   <div class="chat-app" role="dialog" aria-label="Video call">
     <header class="chat-head">
@@ -1045,9 +1053,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Typing secretbrowser opens the virtual browser (closing it ends the session)
-const BROWSER_WORD = 'secretbrowser';
-let browserTyped = '';
+// Virtual browser window (closing it ends the session)
 function openBrowserWindow() {
   const frame = $('#browserFrame');
   if (frame.getAttribute('src') === 'about:blank') frame.src = '/browser';
@@ -1057,17 +1063,30 @@ function closeBrowserWindow() {
   $('#browserModal').classList.remove('open');
   $('#browserFrame').src = 'about:blank';
 }
-document.addEventListener('keydown', e => {
-  if (!e.key || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
-  browserTyped = (browserTyped + e.key.toLowerCase()).slice(-BROWSER_WORD.length);
-  if (browserTyped === BROWSER_WORD) {
-    browserTyped = '';
-    openBrowserWindow();
-  }
-});
+// Clicking the Chrome app in the shelf opens the virtual browser
+$('button.app[aria-label="Chrome"]').addEventListener('click', openBrowserWindow);
 window.addEventListener('message', e => {
   if (e.origin === location.origin && e.data === 'close-cloud-browser') closeBrowserWindow();
 });
+
+// Typing secretmobile opens the Android emulator
+const MOBILE_WORD = 'secretmobile';
+let mobileTyped = '';
+function closeMobileWindow() {
+  $('#mobileModal').classList.remove('open');
+  $('#mobileFrame').src = 'about:blank';
+}
+document.addEventListener('keydown', e => {
+  if (!e.key || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
+  mobileTyped = (mobileTyped + e.key.toLowerCase()).slice(-MOBILE_WORD.length);
+  if (mobileTyped === MOBILE_WORD) {
+    mobileTyped = '';
+    const frame = $('#mobileFrame');
+    if (frame.getAttribute('src') === 'about:blank') frame.src = '/mobile';
+    $('#mobileModal').classList.add('open');
+  }
+});
+$('#mobileClose').addEventListener('click', closeMobileWindow);
 
 // Typing secretadmin opens the support panel (only works for the support account)
 const ADMIN_WORD = 'secretadmin';
