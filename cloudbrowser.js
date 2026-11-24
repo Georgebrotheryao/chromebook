@@ -21,8 +21,9 @@ const MAX_MS = (parseInt(process.env.BROWSER_MAX_MINUTES, 10) || 90) * 60 * 1000
 const HOME_URL = process.env.BROWSER_HOME || 'https://www.bing.com/';
 // Used when something typed in the address bar is not a web address
 const SEARCH_URL = process.env.BROWSER_SEARCH || 'https://www.bing.com/search?q=';
-const MAX_W = 1920;
-const MAX_H = 1080;
+const MAX_W = 1280;   // capped: bigger viewports eat RAM/CPU and cause lag + crashes
+const MAX_H = 720;
+const QUALITY = parseInt(process.env.BROWSER_QUALITY, 10) || 35;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const sessions = new Map(); // user id -> session
@@ -52,23 +53,29 @@ function isPrivateIp(ip) {
 }
 
 const hostCache = new Map(); // host -> { blocked, t }
+const hostPending = new Map(); // host -> Promise (one lookup per host at a time)
 async function hostBlocked(host) {
   host = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
   if (!host) return true;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) return true;
   if (net.isIP(host)) return isPrivateIp(host);
   const hit = hostCache.get(host);
-  if (hit && Date.now() - hit.t < 60000) return hit.blocked;
-  let blocked = false;
-  try {
-    const addrs = await dns.lookup(host, { all: true });
-    blocked = addrs.some(a => isPrivateIp(a.address));
-  } catch (e) {
-    blocked = false; // does not resolve: Chromium will show its own error page
-  }
-  if (hostCache.size > 500) hostCache.clear();
-  hostCache.set(host, { blocked: blocked, t: Date.now() });
-  return blocked;
+  if (hit && Date.now() - hit.t < 300000) return hit.blocked;
+  if (hostPending.has(host)) return hostPending.get(host);
+  const p = (async () => {
+    let blocked = false;
+    try {
+      const addrs = await dns.lookup(host, { all: true });
+      blocked = addrs.some(a => isPrivateIp(a.address));
+    } catch (e) {
+      blocked = false; // does not resolve: Chromium will show its own error page
+    }
+    if (hostCache.size > 500) hostCache.clear();
+    hostCache.set(host, { blocked: blocked, t: Date.now() });
+    return blocked;
+  })().finally(() => hostPending.delete(host));
+  hostPending.set(host, p);
+  return p;
 }
 
 // ---------- Helpers ----------
@@ -92,7 +99,19 @@ function getBrowser() {
   if (!browserPromise) {
     browserPromise = chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio']
+      args: [
+        '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio',
+        '--disable-extensions', '--disable-component-update', '--disable-default-apps',
+        '--disable-background-networking', '--disable-sync', '--disable-translate',
+        '--disable-breakpad', '--disable-crash-reporter', '--no-first-run', '--metrics-recording-only',
+        '--disable-hang-monitor', '--disable-ipc-flooding-protection',
+        '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-features=Translate,MediaRouter,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process',
+        '--renderer-process-limit=2',
+        '--js-flags=--max-old-space-size=256',
+        '--force-color-profile=srgb', '--hide-scrollbars'
+      ]
     }).then(b => {
       b.on('disconnected', () => {
         browserPromise = null;
@@ -165,6 +184,8 @@ async function run(ws, user, size) {
       viewport: { width: w, height: h },
       userAgent: UA,
       locale: 'en-US',
+      deviceScaleFactor: 1,
+      reducedMotion: 'reduce',
       serviceWorkers: 'block',
       acceptDownloads: false
     });
@@ -180,6 +201,8 @@ async function run(ws, user, size) {
     try { u = new URL(route.request().url()); } catch (e) { return route.abort().catch(() => {}); }
     if (u.protocol === 'data:' || u.protocol === 'blob:' || u.protocol === 'about:') return route.continue().catch(() => {});
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return route.abort().catch(() => {});
+    const rt = route.request().resourceType();
+    if (rt === 'media') return route.abort().catch(() => {});
     if (await hostBlocked(u.hostname)) return route.abort('blockedbyclient').catch(() => {});
     return route.continue().catch(() => {});
   });
@@ -203,7 +226,21 @@ async function run(ws, user, size) {
     } catch (e) {}
   });
   page.on('dialog', d => d.dismiss().catch(() => {}));
-  page.on('crash', () => end('The page crashed.', 4006));
+  let crashes = 0;
+  page.on('crash', async () => {
+    if (ended || ++crashes > 3) return end('The page crashed.', 4006);
+    try {
+      const u = page.url();
+      await page.close().catch(() => {});
+      page = await context.newPage();
+      cdp = await context.newCDPSession(page);
+      page.on('dialog', d => d.dismiss().catch(() => {}));
+      wireScreencast();
+      await startScreencast();
+      if (/^https?:/.test(u)) page.goto(u, { waitUntil: 'commit', timeout: 30000 }).catch(() => {});
+      send({ t: 'err', msg: 'Page ran out of memory and was restarted.' });
+    } catch (e) { end('The page crashed.', 4006); }
+  });
 
   // Address bar + back/forward state
   let metaTimer = null;
@@ -227,15 +264,23 @@ async function run(ws, user, size) {
   page.on('domcontentloaded', pushMeta);
   page.on('load', pushMeta);
 
-  // Screen: Chromium pushes a JPEG whenever something on the page changes
-  cdp.on('Page.screencastFrame', ev => {
-    if (!ended && ws.readyState === 1 && ws.bufferedAmount < 600000) {
-      ws.send(Buffer.from(ev.data, 'base64'));
-    }
-    cdp.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
-  });
+  // Screen: ack a frame only after the previous one has left the socket, so frames never pile up
+  let sw = w, sh = h;
+  function wireScreencast() {
+    const c = cdp;
+    c.on('Page.screencastFrame', ev => {
+      const ack = () => c.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
+      if (ended || ws.readyState !== 1) return ack();
+      if (ws.bufferedAmount > 200000) return setTimeout(ack, 40); // client is behind: skip this frame
+      ws.send(Buffer.from(ev.data, 'base64'), { binary: true }, ack);
+    });
+  }
+  function startScreencast() {
+    return cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: sw, maxHeight: sh, everyNthFrame: 1 });
+  }
+  wireScreencast();
   try {
-    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: MAX_W, maxHeight: MAX_H, everyNthFrame: 1 });
+    await startScreencast();
   } catch (e) {
     return end('The browser could not start. Try again in a moment.', 4004);
   }
@@ -244,9 +289,24 @@ async function run(ws, user, size) {
   let queue = Promise.resolve();
   let queued = 0;
   function enqueue(fn, droppable) {
-    if (droppable && queued > 40) return;
+    if (droppable && queued > 8) return;
     queued++;
     queue = queue.then(fn).catch(() => {}).then(() => { queued--; });
+  }
+  // Only the newest mouse position matters: keep one pending move instead of a backlog
+  let moveSlot = null, wheelAcc = null;
+  function latestMove(x, y) {
+    const idle = !moveSlot;
+    moveSlot = { x: x, y: y };
+    if (idle) enqueue(async () => { const m = moveSlot; moveSlot = null; await page.mouse.move(m.x, m.y); });
+  }
+  function accWheel(x, y, dx, dy) {
+    const idle = !wheelAcc;
+    if (idle) wheelAcc = { x: x, y: y, dx: 0, dy: 0 };
+    wheelAcc.x = x; wheelAcc.y = y;
+    wheelAcc.dx = Math.max(-2000, Math.min(2000, wheelAcc.dx + dx));
+    wheelAcc.dy = Math.max(-2000, Math.min(2000, wheelAcc.dy + dy));
+    if (idle) enqueue(async () => { const m = wheelAcc; wheelAcc = null; await page.mouse.move(m.x, m.y); await page.mouse.wheel(m.dx, m.dy); });
   }
 
   async function navigate(text) {
@@ -267,7 +327,7 @@ async function run(ws, user, size) {
         const y = num(m.y, 0, MAX_H);
         const button = ['left', 'middle', 'right'][m.b] || 'left';
         const clickCount = Math.round(num(m.n || 1, 1, 3));
-        if (m.a === 'move') enqueue(() => page.mouse.move(x, y), true);
+        if (m.a === 'move') latestMove(x, y);
         else if (m.a === 'down') enqueue(async () => { await page.mouse.move(x, y); await page.mouse.down({ button: button, clickCount: clickCount }); });
         else if (m.a === 'up') enqueue(async () => { await page.mouse.move(x, y); await page.mouse.up({ button: button, clickCount: clickCount }); });
         break;
@@ -277,7 +337,7 @@ async function run(ws, user, size) {
         const y = num(m.y, 0, MAX_H);
         const dx = num(m.dx, -1000, 1000);
         const dy = num(m.dy, -1000, 1000);
-        enqueue(async () => { await page.mouse.move(x, y); await page.mouse.wheel(dx, dy); });
+        accWheel(x, y, dx, dy);
         break;
       }
       case 'key': {
@@ -310,7 +370,11 @@ async function run(ws, user, size) {
       case 'size': {
         const nw = Math.round(num(m.w, 320, MAX_W));
         const nh = Math.round(num(m.h, 240, MAX_H));
-        page.setViewportSize({ width: nw, height: nh }).catch(() => {});
+        if (nw === sw && nh === sh) break;
+        sw = nw; sh = nh;
+        page.setViewportSize({ width: nw, height: nh })
+          .then(() => cdp.send('Page.stopScreencast').then(startScreencast))
+          .catch(() => {});
         break;
       }
     }
