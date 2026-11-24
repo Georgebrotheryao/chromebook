@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cloudBrowser = require('./cloudbrowser');
+const android = require('./android');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -87,6 +88,7 @@ const gamesHtml = loadFile('games.html');
 const mouseHtml = loadFile('mouse.html');
 const adminHtml = loadFile('admin.html');
 const browserHtml = loadFile('browser.html');
+const androidHtml = loadFile('android.html');
 
 function safeWrite(res, data) {
   try {
@@ -769,12 +771,15 @@ const server = http.createServer((req, res) => {
       res.writeHead(302, { 'Location': '/login?next=%2Fmobile' });
       return res.end();
     }
+    // An external emulator (ANDROID_URL) still wins; otherwise the built-in one (android.js) is shown
     const target = process.env.ANDROID_URL || '';
-    if (!/^https?:\/\//i.test(target)) {
-      return sendHtml(res, '<!DOCTYPE html><body style="font-family:sans-serif;background:#202124;color:#e8eaed;padding:24px"><p>The Android emulator is not set up yet. Run it on a separate Linux server (see android-server/README.md), then set ANDROID_URL on this app to its address.</p>');
-    }
+    if (!/^https?:\/\//i.test(target)) return sendHtml(res, androidHtml);
     res.writeHead(302, { 'Location': target });
     return res.end();
+  }
+  if (p.startsWith('/mobile/')) {
+    const me = currentUser(req);
+    if (android.handle(req, res, p, me, isAdmin(me))) return;
   }
   if (get && p === '/browser') {
     if (!currentUser(req)) {
@@ -826,6 +831,7 @@ const server = http.createServer((req, res) => {
 
 server.on('error', err => console.error('Server error:', err));
 cloudBrowser.attach(server, currentUser);
+android.attach(server, currentUser);
 server.listen(PORT, '0.0.0.0', () => {
   console.log('LocalChat running on port ' + PORT);
 });
