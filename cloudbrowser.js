@@ -18,7 +18,9 @@ try {
 const MAX_SESSIONS = parseInt(process.env.BROWSER_MAX_SESSIONS, 10) || 2;               // browsers at once
 const IDLE_MS = (parseInt(process.env.BROWSER_IDLE_MINUTES, 10) || 5) * 60 * 1000;      // close after no input
 const MAX_MS = (parseInt(process.env.BROWSER_MAX_MINUTES, 10) || 90) * 60 * 1000;       // hard time limit
-const HOME_URL = process.env.BROWSER_HOME || 'https://duckduckgo.com/';
+const HOME_URL = process.env.BROWSER_HOME || 'https://www.bing.com/';
+// Used when something typed in the address bar is not a web address
+const SEARCH_URL = process.env.BROWSER_SEARCH || 'https://www.bing.com/search?q=';
 const MAX_W = 1920;
 const MAX_H = 1080;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -82,7 +84,7 @@ function normalizeInput(text) {
   if (/^https?:\/\//i.test(text)) return text;
   if (/^(javascript|data|file|blob|about|chrome|view-source|ftp):/i.test(text)) return null;
   if (!/\s/.test(text) && (text.indexOf('.') > 0 || /^localhost(:\d+)?(\/|$)/i.test(text))) return 'https://' + text;
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(text);
+  return SEARCH_URL + encodeURIComponent(text);
 }
 
 function getBrowser() {
