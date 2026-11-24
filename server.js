@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const cloudBrowser = require('./cloudbrowser');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -85,6 +86,7 @@ const loginHtml = loadFile('login.html');
 const gamesHtml = loadFile('games.html');
 const mouseHtml = loadFile('mouse.html');
 const adminHtml = loadFile('admin.html');
+const browserHtml = loadFile('browser.html');
 
 function safeWrite(res, data) {
   try {
@@ -762,6 +764,16 @@ const server = http.createServer((req, res) => {
   }
   if (get && p === '/games/state') return handleGameState(req, res, url.searchParams.get('room') || '');
   if (get && p === '/games/info') return handleGameInfo(req, res, url.searchParams.get('room') || '');
+  if (get && p === '/browser') {
+    if (!currentUser(req)) {
+      res.writeHead(302, { 'Location': '/login?next=%2Fbrowser' });
+      return res.end();
+    }
+    if (!cloudBrowser.enabled) {
+      return sendHtml(res, '<!DOCTYPE html><body style="font-family:sans-serif;background:#202124;color:#e8eaed;padding:24px"><p>The virtual browser is not installed on this server.</p>');
+    }
+    return sendHtml(res, browserHtml);
+  }
   if (get && p === '/mouse') {
     if (!currentUser(req)) {
       res.writeHead(302, { 'Location': '/login?next=%2Fmouse' });
@@ -801,6 +813,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('error', err => console.error('Server error:', err));
+cloudBrowser.attach(server, currentUser);
 server.listen(PORT, '0.0.0.0', () => {
   console.log('LocalChat running on port ' + PORT);
 });
