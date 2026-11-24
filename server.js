@@ -764,6 +764,18 @@ const server = http.createServer((req, res) => {
   }
   if (get && p === '/games/state') return handleGameState(req, res, url.searchParams.get('room') || '');
   if (get && p === '/games/info') return handleGameInfo(req, res, url.searchParams.get('room') || '');
+  if (get && p === '/mobile') {
+    if (!currentUser(req)) {
+      res.writeHead(302, { 'Location': '/login?next=%2Fmobile' });
+      return res.end();
+    }
+    const target = process.env.ANDROID_URL || '';
+    if (!/^https?:\/\//i.test(target)) {
+      return sendHtml(res, '<!DOCTYPE html><body style="font-family:sans-serif;background:#202124;color:#e8eaed;padding:24px"><p>The Android emulator is not set up yet. Run it on a separate Linux server (see android-server/README.md), then set ANDROID_URL on this app to its address.</p>');
+    }
+    res.writeHead(302, { 'Location': target });
+    return res.end();
+  }
   if (get && p === '/browser') {
     if (!currentUser(req)) {
       res.writeHead(302, { 'Location': '/login?next=%2Fbrowser' });
