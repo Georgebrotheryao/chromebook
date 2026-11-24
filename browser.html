@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#202124;color:#e8eaed;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  .bar{display:flex;align-items:center;gap:6px;height:46px;padding:0 8px;background:#35363a;flex:none}
+  .btn{width:34px;height:34px;border:0;border-radius:50%;background:transparent;color:#e8eaed;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none}
+  .btn:hover:not(:disabled){background:rgba(255,255,255,.12)}
+  .btn:disabled{opacity:.35;cursor:default}
+  #url{flex:1;min-width:0;height:34px;border:0;border-radius:17px;background:#202124;color:#e8eaed;padding:0 16px;font:inherit;font-size:14px;outline:none}
+  #url:focus{box-shadow:0 0 0 2px #8ab4f8}
+  #stage{position:relative;flex:1;min-height:0;background:#000}
+  #screen{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;outline:none;display:block}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.78);text-align:center;padding:24px;z-index:2}
+  #overlay.hide{display:none}
+  #overlay p{margin:0;font-size:16px;max-width:380px;line-height:1.4}
+  #overlay button{height:38px;padding:0 20px;border:0;border-radius:19px;background:#8ab4f8;color:#202124;font:inherit;font-weight:600;cursor:pointer}
+  #overlay button.hide{display:none}
+  .spin{width:30px;height:30px;border:3px solid #5f6368;border-top-color:#8ab4f8;border-radius:50%;animation:sp .8s linear infinite}
+  .spin.hide{display:none}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  #toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:#3c4043;color:#e8eaed;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:3}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="bar">
+  <button class="btn" id="back" aria-label="Back" disabled>&#8592;</button>
+  <button class="btn" id="fwd" aria-label="Forward" disabled>&#8594;</button>
+  <button class="btn" id="reload" aria-label="Reload">&#10227;</button>
+  <input id="url" type="text" placeholder="Search or type a web address" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="btn" id="close" aria-label="Close browser">&times;</button>
+</div>
+<div id="stage">
+  <canvas id="screen" tabindex="0" width="1280" height="720"></canvas>
+  <div id="overlay"><div class="spin" id="spin"></div><p id="msg">Starting browser&hellip;</p><button id="again" class="hide">Start new session</button></div>
+  <div id="toast"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const canvas = $('#screen');
+const ctx = canvas.getContext('2d');
+const stage = $('#stage');
+const urlInput = $('#url');
+
+let ws = null;
+let ready = false;
+let pending = null;
+let drawing = false;
+const held = new Set();
+
+function showOverlay(text, ended) {
+  $('#msg').textContent = text;
+  $('#spin').classList.toggle('hide', !!ended);
+  $('#again').classList.toggle('hide', !ended);
+  $('#overlay').classList.remove('hide');
+}
+function toast(text) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show'), 2500);
+}
+function send(o) {
+  if (ready && ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+}
+
+function connect() {
+  ready = false;
+  held.clear();
+  showOverlay('Starting browser\u2026', false);
+  const r = stage.getBoundingClientRect();
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(proto + location.host + '/browser/ws?w=' + Math.round(r.width) + '&h=' + Math.round(r.height));
+  ws.binaryType = 'blob';
+  let endMsg = null;
+  ws.onmessage = e => {
+    if (typeof e.data !== 'string') {
+      pending = e.data;
+      if (!drawing) drawLoop();
+      return;
+    }
+    let m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    if (m.t === 'ready') {
+      ready = true;
+      $('#overlay').classList.add('hide');
+      canvas.focus();
+    } else if (m.t === 'meta') {
+      if (document.activeElement !== urlInput) urlInput.value = m.url;
+      $('#back').disabled = !m.back;
+      $('#fwd').disabled = !m.fwd;
+    } else if (m.t === 'err') {
+      toast(m.msg);
+    } else if (m.t === 'clip') {
+      if (navigator.clipboard && m.text) navigator.clipboard.writeText(m.text).catch(() => {});
+    } else if (m.t === 'end') {
+      endMsg = m.msg;
+    }
+  };
+  ws.onclose = () => {
+    ready = false;
+    showOverlay(endMsg || 'Disconnected.', true);
+  };
+}
+
+// Draw only the newest frame
+async function drawLoop() {
+  drawing = true;
+  while (pending) {
+    const blob = pending;
+    pending = null;
+    try {
+      const bmp = await createImageBitmap(blob);
+      if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+        canvas.width = bmp.width;
+        canvas.height = bmp.height;
+      }
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close();
+    } catch (e) {}
+  }
+  drawing = false;
+}
+
+// Screen position -> position inside the remote page
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const scale = Math.min(r.width / canvas.width, r.height / canvas.height);
+  const ox = (r.width - canvas.width * scale) / 2;
+  const oy = (r.height - canvas.height * scale) / 2;
+  return {
+    x: Math.max(0, Math.min(canvas.width - 1, (e.clientX - r.left - ox) / scale)),
+    y: Math.max(0, Math.min(canvas.height - 1, (e.clientY - r.top - oy) / scale))
+  };
+}
+
+let lastMove = 0;
+canvas.addEventListener('mousemove', e => {
+  const now = performance.now();
+  if (now - lastMove < 33) return;
+  lastMove = now;
+  const p = pos(e);
+  send({ t: 'mouse', a: 'move', x: p.x, y: p.y });
+});
+canvas.addEventListener('mousedown', e => {
+  canvas.focus();
+  const p = pos(e);
+  send({ t: 'mouse', a: 'down', x: p.x, y: p.y, b: e.button, n: e.detail });
+  e.preventDefault();
+});
+window.addEventListener('mouseup', e => {
+  const p = pos(e);
+  send({ t: 'mouse', a: 'up', x: p.x, y: p.y, b: e.button, n: e.detail });
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const k = e.deltaMode === 1 ? 16 : 1;
+  const p = pos(e);
+  send({ t: 'wheel', x: p.x, y: p.y, dx: e.deltaX * k, dy: e.deltaY * k });
+}, { passive: false });
+
+// Keyboard
+canvas.addEventListener('keydown', e => {
+  const k = e.key;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && k.toLowerCase() === 'l') { e.preventDefault(); urlInput.focus(); urlInput.select(); return; }
+  if (k === 'F5' || (mod && k.toLowerCase() === 'r')) { e.preventDefault(); send({ t: 'reload' }); return; }
+  if (mod && k.toLowerCase() === 'v') return;          // the paste event below handles this
+  if (mod && k.toLowerCase() === 'c') send({ t: 'copy' });
+  e.preventDefault();
+  held.add(k);
+  send({ t: 'key', a: 'down', key: k });
+});
+canvas.addEventListener('keyup', e => {
+  e.preventDefault();
+  held.delete(e.key);
+  send({ t: 'key', a: 'up', key: e.key });
+});
+canvas.addEventListener('blur', () => {
+  held.forEach(k => send({ t: 'key', a: 'up', key: k }));
+  held.clear();
+});
+document.addEventListener('paste', e => {
+  if (document.activeElement === urlInput) return;
+  const text = e.clipboardData && e.clipboardData.getData('text');
+  if (text) { send({ t: 'text', text: text }); e.preventDefault(); }
+});
+
+// Toolbar
+$('#back').onclick = () => send({ t: 'back' });
+$('#fwd').onclick = () => send({ t: 'fwd' });
+$('#reload').onclick = () => send({ t: 'reload' });
+$('#close').onclick = () => parent.postMessage('close-cloud-browser', location.origin);
+$('#again').onclick = connect;
+urlInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    send({ t: 'goto', url: urlInput.value });
+    canvas.focus();
+  } else if (e.key === 'Escape') {
+    canvas.focus();
+  }
+});
+urlInput.addEventListener('focus', () => urlInput.select());
+
+// Keep the remote window the same size as this one
+let resizeTimer = null;
+new ResizeObserver(() => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const r = stage.getBoundingClientRect();
+    send({ t: 'size', w: Math.round(r.width), h: Math.round(r.height) });
+  }, 250);
+}).observe(stage);
+
+connect();
+</script>
+</body>
+</html>
