@@ -67,7 +67,7 @@ function toast(text) {
   clearTimeout(toast.t);
   toast.t = setTimeout(() => t.classList.remove('show'), 2500);
 }
-const RW = 1024, RH = 576; // remote render size cap: smaller = much faster
+const RW = 1280, RH = 720; // remote render size cap: smaller = much faster
 function fit(r) {
   const k = Math.min(1, RW / r.width, RH / r.height);
   return { w: Math.max(320, Math.round(r.width * k)), h: Math.max(240, Math.round(r.height * k)) };
