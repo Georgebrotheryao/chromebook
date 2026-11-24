@@ -23,7 +23,7 @@ const HOME_URL = process.env.BROWSER_HOME || 'https://www.bing.com/';
 const SEARCH_URL = process.env.BROWSER_SEARCH || 'https://www.bing.com/search?q=';
 const MAX_W = 1280;   // capped: bigger viewports eat RAM/CPU and cause lag + crashes
 const MAX_H = 720;
-const QUALITY = parseInt(process.env.BROWSER_QUALITY, 10) || 35;
+const QUALITY = parseInt(process.env.BROWSER_QUALITY, 10) || 45;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const sessions = new Map(); // user id -> session
@@ -271,7 +271,7 @@ async function run(ws, user, size) {
     c.on('Page.screencastFrame', ev => {
       const ack = () => c.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
       if (ended || ws.readyState !== 1) return ack();
-      if (ws.bufferedAmount > 200000) return setTimeout(ack, 40); // client is behind: skip this frame
+      if (ws.bufferedAmount > 100000) return setTimeout(ack, 40); // client is behind: skip this frame
       ws.send(Buffer.from(ev.data, 'base64'), { binary: true }, ack);
     });
   }
@@ -298,7 +298,7 @@ async function run(ws, user, size) {
   function latestMove(x, y) {
     const idle = !moveSlot;
     moveSlot = { x: x, y: y };
-    if (idle) enqueue(async () => { const m = moveSlot; moveSlot = null; await page.mouse.move(m.x, m.y); });
+    if (idle) enqueue(async () => { const m = moveSlot; moveSlot = null; await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: m.x, y: m.y }); });
   }
   function accWheel(x, y, dx, dy) {
     const idle = !wheelAcc;
@@ -306,7 +306,7 @@ async function run(ws, user, size) {
     wheelAcc.x = x; wheelAcc.y = y;
     wheelAcc.dx = Math.max(-2000, Math.min(2000, wheelAcc.dx + dx));
     wheelAcc.dy = Math.max(-2000, Math.min(2000, wheelAcc.dy + dy));
-    if (idle) enqueue(async () => { const m = wheelAcc; wheelAcc = null; await page.mouse.move(m.x, m.y); await page.mouse.wheel(m.dx, m.dy); });
+    if (idle) enqueue(async () => { const m = wheelAcc; wheelAcc = null; await cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: m.x, y: m.y, deltaX: m.dx, deltaY: m.dy }); });
   }
 
   async function navigate(text) {
@@ -328,8 +328,8 @@ async function run(ws, user, size) {
         const button = ['left', 'middle', 'right'][m.b] || 'left';
         const clickCount = Math.round(num(m.n || 1, 1, 3));
         if (m.a === 'move') latestMove(x, y);
-        else if (m.a === 'down') enqueue(async () => { await page.mouse.move(x, y); await page.mouse.down({ button: button, clickCount: clickCount }); });
-        else if (m.a === 'up') enqueue(async () => { await page.mouse.move(x, y); await page.mouse.up({ button: button, clickCount: clickCount }); });
+        else if (m.a === 'down') enqueue(() => cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x, y: y, button: button, buttons: button === 'left' ? 1 : button === 'right' ? 2 : 4, clickCount: clickCount }));
+        else if (m.a === 'up') enqueue(() => cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x, y: y, button: button, buttons: 0, clickCount: clickCount }));
         break;
       }
       case 'wheel': {
