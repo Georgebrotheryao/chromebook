@@ -399,7 +399,7 @@ function attach(server, currentUser) {
   server.on('upgrade', (req, socket, head) => {
     let url;
     try { url = new URL(req.url, 'http://localhost'); } catch (e) { return socket.destroy(); }
-    if (url.pathname !== '/browser/ws') return socket.destroy();
+    if (url.pathname !== '/browser/ws') return; // other paths (e.g. /mobile/ws) are handled by android.js
 
     // Only signed-in users, and only from this site's own pages
     const user = currentUser(req);
