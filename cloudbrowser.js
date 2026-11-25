@@ -23,7 +23,8 @@ const HOME_URL = process.env.BROWSER_HOME || 'https://www.bing.com/';
 const SEARCH_URL = process.env.BROWSER_SEARCH || 'https://www.bing.com/search?q=';
 const MAX_W = 1280;   // capped: bigger viewports eat RAM/CPU and cause lag + crashes
 const MAX_H = 720;
-const QUALITY = parseInt(process.env.BROWSER_QUALITY, 10) || 45;
+const QUALITY = parseInt(process.env.BROWSER_QUALITY, 10) || 50;
+const FRAME_SKIP = parseInt(process.env.BROWSER_FRAME_SKIP, 10) || 2;   // 2 = about 30 fps max, halves CPU vs 60
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const sessions = new Map(); // user id -> session
@@ -78,6 +79,94 @@ async function hostBlocked(host) {
   return p;
 }
 
+
+// ---------- Local filtering proxy ----------
+// Chromium sends all traffic through this tiny in-process proxy instead of Playwright's per-request
+// route() hook (which round-trips EVERY request through Node and was a big source of lag).
+// The proxy also connects to the IP it checked (no DNS-rebinding trick) and drops ad/tracker hosts,
+// which saves a lot of CPU/RAM on a 1 vCPU / 0.5 GB Railway free instance.
+const http = require('http');
+const BLOCK_HOSTS = (process.env.BROWSER_BLOCK_ADS === '0') ? [] : [
+  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google-analytics.com',
+  'googletagmanager.com', 'googletagservices.com', 'adservice.google.com', 'adnxs.com', 'adsrvr.org',
+  'taboola.com', 'outbrain.com', 'criteo.com', 'criteo.net', 'scorecardresearch.com', 'quantserve.com',
+  'hotjar.com', 'facebook.net', 'connect.facebook.net', 'ads-twitter.com', 'amazon-adsystem.com',
+  'pubmatic.com', 'rubiconproject.com', 'openx.net', 'casalemedia.com', 'moatads.com', 'adform.net',
+  'mathtag.com', 'bluekai.com', 'demdex.net', 'krxd.net', 'yieldmo.com', 'smartadserver.com',
+  'mgid.com', 'popads.net', 'propellerads.com', 'exoclick.com', 'adsterra.com', 'clarity.ms',
+  'segment.io', 'segment.com', 'mixpanel.com', 'newrelic.com', 'nr-data.net', 'sentry.io'
+];
+function adHost(host) {
+  for (let i = 0; i < BLOCK_HOSTS.length; i++) {
+    const b = BLOCK_HOSTS[i];
+    if (host === b || host.endsWith('.' + b)) return true;
+  }
+  return false;
+}
+
+const ipCache = new Map(); // host -> { ip, t }
+async function resolvePublic(host) {
+  host = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) return null;
+  if (adHost(host)) return null;
+  if (net.isIP(host)) return isPrivateIp(host) ? null : host;
+  const hit = ipCache.get(host);
+  if (hit && Date.now() - hit.t < 60000) return hit.ip;
+  let ip = null;
+  try {
+    const addrs = await dns.lookup(host, { all: true });
+    if (addrs.length && !addrs.some(a => isPrivateIp(a.address))) ip = addrs[0].address;
+  } catch (e) {}
+  if (ipCache.size > 500) ipCache.clear();
+  ipCache.set(host, { ip: ip, t: Date.now() });
+  return ip;
+}
+
+let proxyPromise = null;
+function startProxy() {
+  if (proxyPromise) return proxyPromise;
+  proxyPromise = new Promise((resolve, reject) => {
+    const srv = http.createServer(async (req, res) => {          // plain http:// requests
+      let u;
+      try { u = new URL(req.url); } catch (e) { res.writeHead(400); return res.end(); }
+      if (u.protocol !== 'http:') { res.writeHead(403); return res.end(); }
+      const ip = await resolvePublic(u.hostname);
+      if (!ip) { res.writeHead(403); return res.end(); }
+      const headers = Object.assign({}, req.headers);
+      delete headers['proxy-connection'];
+      const up = http.request({ host: ip, port: u.port || 80, method: req.method, path: u.pathname + u.search, headers: headers, timeout: 30000 }, r => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      up.on('error', () => { try { res.writeHead(502); } catch (e) {} res.end(); });
+      up.on('timeout', () => up.destroy());
+      req.pipe(up);
+    });
+    srv.on('connect', async (req, client, head) => {              // https:// tunnels
+      client.on('error', () => {});
+      const m = /^(.+):(\d+)$/.exec(req.url || '');
+      if (!m) return client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      const ip = await resolvePublic(m[1]);
+      if (!ip) return client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+      const up = net.connect({ host: ip, port: parseInt(m[2], 10), timeout: 30000 }, () => {
+        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (head && head.length) up.write(head);
+        up.pipe(client);
+        client.pipe(up);
+      });
+      up.setNoDelay(true);
+      client.setNoDelay(true);
+      up.on('timeout', () => up.destroy());
+      up.on('error', () => client.destroy());
+      client.on('close', () => up.destroy());
+      up.on('close', () => client.destroy());
+    });
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => resolve(srv.address().port));
+  });
+  return proxyPromise;
+}
+
 // ---------- Helpers ----------
 function num(v, min, max) {
   v = Number(v);
@@ -97,7 +186,7 @@ function normalizeInput(text) {
 function getBrowser() {
   clearTimeout(shutdownTimer);
   if (!browserPromise) {
-    browserPromise = chromium.launch({
+    browserPromise = startProxy().then(port => chromium.launch({
       headless: true,
       args: [
         '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--mute-audio',
@@ -107,12 +196,16 @@ function getBrowser() {
         '--disable-hang-monitor', '--disable-ipc-flooding-protection',
         '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
-        '--disable-features=Translate,MediaRouter,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process',
-        '--renderer-process-limit=2',
-        '--js-flags=--max-old-space-size=256',
+        '--renderer-process-limit=1', '--disable-site-isolation-trials',
+        '--js-flags=--max-old-space-size=192 --max-lazy',
+        '--enable-low-end-device-mode', '--disable-low-res-tiling', '--disable-lcd-text',
+        '--disable-smooth-scrolling', '--autoplay-policy=user-gesture-required',
+        '--disable-quic', '--disable-features=Translate,MediaRouter,OptimizationHints,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,BackForwardCache,PaintHolding,AutofillServerCommunication,CalculateNativeWinOcclusion',
+        '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--proxy-server=http://127.0.0.1:' + port, '--proxy-bypass-list=<-loopback>',
         '--force-color-profile=srgb', '--hide-scrollbars'
       ]
-    }).then(b => {
+    })).then(b => {
       b.on('disconnected', () => {
         browserPromise = null;
         sessions.forEach(s => s.end('The browser stopped unexpectedly.', 4006));
@@ -195,17 +288,7 @@ async function run(ws, user, size) {
   }
   if (ended) { await context.close().catch(() => {}); return; }
 
-  // Every request goes through this check: only normal web pages, never the server's own network
-  await context.route('**/*', async route => {
-    let u;
-    try { u = new URL(route.request().url()); } catch (e) { return route.abort().catch(() => {}); }
-    if (u.protocol === 'data:' || u.protocol === 'blob:' || u.protocol === 'about:') return route.continue().catch(() => {});
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return route.abort().catch(() => {});
-    const rt = route.request().resourceType();
-    if (rt === 'media') return route.abort().catch(() => {});
-    if (await hostBlocked(u.hostname)) return route.abort('blockedbyclient').catch(() => {});
-    return route.continue().catch(() => {});
-  });
+  // Network filtering (private IPs, ads) is done by the local proxy, not per request in Node.
 
   let page, cdp;
   try {
@@ -264,19 +347,36 @@ async function run(ws, user, size) {
   page.on('domcontentloaded', pushMeta);
   page.on('load', pushMeta);
 
-  // Screen: ack a frame only after the previous one has left the socket, so frames never pile up
+  // Screen: ack a frame only after the previous one has left the socket, so frames never pile up.
+  // Quality adapts: if the link/CPU is slow we send smaller frames, if it is fast we sharpen again.
   let sw = w, sh = h;
+  let q = QUALITY, sendMs = 0, lastAdapt = 0;
+  function adapt() {
+    const now = Date.now();
+    if (now - lastAdapt < 3000 || ended) return;
+    let nq = q;
+    if (sendMs > 70) nq = Math.max(25, q - 8);
+    else if (sendMs < 20) nq = Math.min(QUALITY, q + 4);
+    if (nq === q) return;
+    lastAdapt = now; q = nq;
+    cdp.send('Page.stopScreencast').then(startScreencast).catch(() => {});
+  }
   function wireScreencast() {
     const c = cdp;
     c.on('Page.screencastFrame', ev => {
       const ack = () => c.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
       if (ended || ws.readyState !== 1) return ack();
-      if (ws.bufferedAmount > 100000) return setTimeout(ack, 40); // client is behind: skip this frame
-      ws.send(Buffer.from(ev.data, 'base64'), { binary: true }, ack);
+      if (ws.bufferedAmount > 60000) { sendMs = Math.max(sendMs, 100); adapt(); return setTimeout(ack, 30); } // client behind: drop frame
+      const t0 = Date.now();
+      ws.send(Buffer.from(ev.data, 'base64'), { binary: true }, () => {
+        sendMs = sendMs * 0.8 + (Date.now() - t0) * 0.2;
+        ack();
+        adapt();
+      });
     });
   }
   function startScreencast() {
-    return cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: sw, maxHeight: sh, everyNthFrame: 1 });
+    return cdp.send('Page.startScreencast', { format: 'jpeg', quality: q, maxWidth: sw, maxHeight: sh, everyNthFrame: FRAME_SKIP });
   }
   wireScreencast();
   try {
@@ -408,6 +508,7 @@ function attach(server, currentUser) {
     if (!user || !sameOrigin) return socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
 
     const size = { w: url.searchParams.get('w'), h: url.searchParams.get('h') };
+    socket.setNoDelay(true);   // send input/frames immediately instead of waiting to batch
     wss.handleUpgrade(req, socket, head, ws => {
       run(ws, user, size).catch(e => {
         console.error('Virtual browser error:', e);
