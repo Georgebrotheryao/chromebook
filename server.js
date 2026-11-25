@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cloudBrowser = require('./cloudbrowser');
 const android = require('./android');
+const spawndroid = require('./spawndroid');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -89,6 +90,7 @@ const mouseHtml = loadFile('mouse.html');
 const adminHtml = loadFile('admin.html');
 const browserHtml = loadFile('browser.html');
 const androidHtml = loadFile('android.html');
+const spawndroidHtml = loadFile('spawndroid.html');
 
 function safeWrite(res, data) {
   try {
@@ -771,6 +773,8 @@ const server = http.createServer((req, res) => {
       res.writeHead(302, { 'Location': '/login?next=%2Fmobile' });
       return res.end();
     }
+    // Spawndroid (cloud Android) is used when SPAWNDROID_API_KEY and SPAWNDROID_APP_SLUG are set
+    if (spawndroid.enabled) return sendHtml(res, spawndroidHtml);
     // An external emulator (ANDROID_URL) still wins; otherwise the built-in one (android.js) is shown
     const target = process.env.ANDROID_URL || '';
     if (!/^https?:\/\//i.test(target)) return sendHtml(res, androidHtml);
@@ -779,6 +783,7 @@ const server = http.createServer((req, res) => {
   }
   if (p.startsWith('/mobile/')) {
     const me = currentUser(req);
+    if (spawndroid.enabled && spawndroid.handle(req, res, p, me)) return;
     if (android.handle(req, res, p, me, isAdmin(me))) return;
   }
   if (get && p === '/browser') {
