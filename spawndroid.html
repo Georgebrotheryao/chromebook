@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#202124;color:#e8eaed;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  .bar{display:flex;align-items:center;gap:6px;height:44px;padding:0 8px;background:#35363a;flex:none}
+  .bar button,.bar a{height:30px;padding:0 12px;border:0;border-radius:15px;background:#3c4043;color:#e8eaed;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+  .bar button:hover:not(:disabled),.bar a:hover{background:#4a4d51}
+  .bar .sp{flex:1}
+  .hide{display:none!important}
+  #info{font-size:12px;color:#9aa0a6;white-space:nowrap}
+  #stage{position:relative;flex:1;min-height:0;background:#000}
+  #frame{position:absolute;inset:0;width:100%;height:100%;border:0}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.82);text-align:center;padding:24px;z-index:2}
+  #overlay p{margin:0;font-size:15px;max-width:460px;line-height:1.45}
+  #overlay button{height:38px;padding:0 22px;border:0;border-radius:19px;background:#8ab4f8;color:#202124;font:inherit;font-weight:600;cursor:pointer}
+  .spin{width:30px;height:30px;border:3px solid #5f6368;border-top-color:#8ab4f8;border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span id="info"></span>
+  <span class="sp"></span>
+  <a id="newtab" class="hide" target="_blank" rel="noopener">Open in new tab</a>
+  <button id="stop" class="hide">Stop</button>
+</div>
+<div id="stage">
+  <iframe id="frame" class="hide" allow="clipboard-read; clipboard-write; fullscreen; autoplay"></iframe>
+  <div id="overlay">
+    <div id="spin" class="spin hide"></div>
+    <p id="msg">Start the Android device. It takes a little while to boot.</p>
+    <button id="go">Start</button>
+  </div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let pingTimer = null, tickTimer = null, left = 0;
+
+function say(text, busy, showButton) {
+  $('#msg').textContent = text;
+  $('#spin').classList.toggle('hide', !busy);
+  $('#go').classList.toggle('hide', !showButton);
+  $('#overlay').classList.remove('hide');
+}
+
+function show(state) {
+  $('#frame').classList.remove('hide');
+  if ($('#frame').getAttribute('src') !== state.url) $('#frame').src = state.url;
+  $('#newtab').href = state.url;
+  $('#newtab').classList.remove('hide');
+  $('#stop').classList.remove('hide');
+  $('#overlay').classList.add('hide');
+  left = state.secondsLeft;
+  clearInterval(tickTimer);
+  tickTimer = setInterval(() => {
+    left = Math.max(0, left - 1);
+    $('#info').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + ' left';
+  }, 1000);
+  clearInterval(pingTimer);
+  pingTimer = setInterval(ping, 20000);
+}
+
+function hide(text) {
+  clearInterval(pingTimer); clearInterval(tickTimer);
+  $('#frame').classList.add('hide'); $('#frame').removeAttribute('src');
+  $('#newtab').classList.add('hide'); $('#stop').classList.add('hide');
+  $('#info').textContent = '';
+  say(text || 'The session ended.', false, true);
+}
+
+async function call(path, method) {
+  const r = await fetch(path, { method: method || 'POST' });
+  return r.json().catch(() => ({ ok: false, error: 'Bad response' }));
+}
+
+async function ping() {
+  const s = await call('/mobile/sd/ping');
+  if (!s.ok || !s.running) hide('The session ended.');
+}
+
+$('#go').addEventListener('click', async () => {
+  say('Starting the device...', true, false);
+  const s = await call('/mobile/sd/start');
+  if (s.ok && s.running) show(s);
+  else say(s.error || 'Could not start the device.', false, true);
+});
+
+$('#stop').addEventListener('click', async () => { await call('/mobile/sd/stop'); hide('Stopped.'); });
+
+(async () => {
+  const s = await call('/mobile/sd/status', 'GET');
+  if (s.ok && s.running) show(s);
+})();
+</script>
+</body>
+</html>
