@@ -18,7 +18,8 @@ const PROFILE = process.env.SPAWNDROID_PROFILE || '';
 const MANUAL_URL = process.env.SPAWNDROID_SHARE_URL || '';
 const MAX_MS = (parseInt(process.env.SPAWNDROID_MAX_MINUTES, 10) || 20) * 60 * 1000;
 const IDLE_MS = (parseInt(process.env.SPAWNDROID_IDLE_MINUTES, 10) || 3) * 60 * 1000;
-const enabled = !!(KEY && SLUG);
+// Easiest mode: only SPAWNDROID_SHARE_URL is set (no API key, no slug). The page just embeds that link.
+const enabled = !!((KEY && SLUG) || MANUAL_URL);
 
 let current = null;   // { id, url, startedAt, lastSeen }
 let link = null;      // { url, expiresAt } cached share link
@@ -65,6 +66,11 @@ async function stop() {
 }
 
 async function doStart() {
+  // Link-only mode: no API calls, just embed the share link you made by hand
+  if (!KEY || !SLUG) {
+    current = { id: null, url: MANUAL_URL, startedAt: Date.now(), lastSeen: Date.now() };
+    return current;
+  }
   // A session may already be live (for example after the site restarted); reuse it
   const live = await api('GET', '/api/apps/' + encodeURIComponent(SLUG) + '/session');
   let id = live.status === 200 ? sessionId(live.data.session) : null;
@@ -116,7 +122,7 @@ function handle(req, res, p, me) {
   if (post && p === '/mobile/sd/ping') {
     if (current) {
       current.lastSeen = Date.now();
-      api('POST', '/api/sessions/' + encodeURIComponent(current.id) + '/heartbeat').catch(() => {});
+      if (current.id) api('POST', '/api/sessions/' + encodeURIComponent(current.id) + '/heartbeat').catch(() => {});
     }
     sendJson(res, 200, Object.assign({ ok: true }, publicState()));
     return true;
