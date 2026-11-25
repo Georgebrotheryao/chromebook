@@ -44,7 +44,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const canvas = $('#screen');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 const stage = $('#stage');
 const urlInput = $('#url');
 
