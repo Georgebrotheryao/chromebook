@@ -36,6 +36,7 @@
     <div id="spin" class="spin hide"></div>
     <p id="msg">Start the Android device. It takes a little while to boot.</p>
     <button id="go">Start</button>
+    <a id="open" class="hide" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;height:38px;padding:0 22px;border-radius:19px;background:#8ab4f8;color:#202124;font-weight:600;text-decoration:none">Open the Android emulator</a>
   </div>
 </div>
 <script>
@@ -50,12 +51,13 @@ function say(text, busy, showButton) {
 }
 
 function show(state) {
-  $('#frame').classList.remove('hide');
-  if ($('#frame').getAttribute('src') !== state.url) $('#frame').src = state.url;
+  // Spawndroid refuses to be shown inside another site's iframe, so it opens in its own tab instead
+  $('#open').href = state.url;
+  $('#open').classList.remove('hide');
   $('#newtab').href = state.url;
   $('#newtab').classList.remove('hide');
   $('#stop').classList.remove('hide');
-  $('#overlay').classList.add('hide');
+  say('Your device is ready. Click the button to open it in a new tab.', false, false);
   left = state.secondsLeft;
   clearInterval(tickTimer);
   tickTimer = setInterval(() => {
@@ -68,7 +70,7 @@ function show(state) {
 
 function hide(text) {
   clearInterval(pingTimer); clearInterval(tickTimer);
-  $('#frame').classList.add('hide'); $('#frame').removeAttribute('src');
+  $('#open').classList.add('hide');
   $('#newtab').classList.add('hide'); $('#stop').classList.add('hide');
   $('#info').textContent = '';
   say(text || 'The session ended.', false, true);
