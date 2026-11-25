@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mouseland</title>
+<style>
+[hidden]{display:none !important}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#07080d;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:none}
+.top{position:fixed;top:12px;left:12px;right:12px;display:flex;align-items:flex-start;gap:10px;pointer-events:none;z-index:5}
+.title{pointer-events:auto;background:rgba(15,17,23,.7);border:1px solid #1f2330;border-radius:14px;padding:8px 14px;backdrop-filter:blur(6px)}
+.title b{font-size:15px}
+.title span{display:block;font-size:12px;color:#8a93a8;margin-top:2px}
+.presence{margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:60%;pointer-events:auto}
+.chip{display:flex;align-items:center;gap:6px;background:rgba(15,17,23,.7);border:1px solid #1f2330;border-radius:12px;padding:4px 10px;font-size:12px;animation:chipIn .3s cubic-bezier(.16,1,.3,1)}
+@keyframes chipIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.chip i{width:8px;height:8px;border-radius:50%;display:block}
+.bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;gap:6px;flex-wrap:wrap;justify-content:center;background:rgba(15,17,23,.78);border:1px solid #1f2330;border-radius:18px;padding:8px;backdrop-filter:blur(6px);z-index:5;max-width:calc(100% - 24px)}
+.bar button{height:34px;padding:0 12px;border-radius:17px;border:1px solid #2a3040;background:#1c2130;color:#e7e9f0;font:inherit;font-size:12px;cursor:pointer;transition:transform .12s,background .15s}
+.bar button:hover{background:#262c3d}
+.bar button:active{transform:scale(.94)}
+.bar button.on{background:linear-gradient(135deg,#7c8cff,#5a6df0);border-color:transparent;color:#fff}
+.hint{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;color:#6b7389;text-align:center;line-height:1.6;pointer-events:none;transition:opacity .6s;z-index:2}
+.say{position:fixed;z-index:8;display:flex;gap:6px;transform:translate(-50%,-120%)}
+.say input{width:200px;height:36px;border-radius:18px;border:1px solid #7c8cff;background:rgba(15,17,23,.9);color:#e7e9f0;padding:0 14px;font:inherit;font-size:14px;outline:none}
+.say input::placeholder{color:#6b7389}
+.note{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);font-size:12px;color:#8a93a8;background:rgba(15,17,23,.7);padding:4px 10px;border-radius:10px;z-index:5;transition:opacity .4s}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="top">
+  <div class="title"><b>Mouseland</b><span id="count">Just you here</span></div>
+  <div class="presence" id="presence"></div>
+</div>
+
+<div class="hint" id="hint">Move your mouse around.<br>Pick an effect below, then click anywhere.</div>
+<div class="note" id="note" hidden></div>
+<div class="say" id="sayBox" hidden>
+  <input id="sayInput" maxlength="40" placeholder="Say something…" autocomplete="off">
+</div>
+
+<div class="bar" id="bar">
+  <button data-mode="ripple" class="on">Ripple (1)</button>
+  <button data-mode="sparkle">Sparkle (2)</button>
+  <button data-mode="heart">Hearts (3)</button>
+  <button data-mode="confetti">Confetti (4)</button>
+  <button data-mode="rain">Rain (5)</button>
+  <button data-mode="say">Say (6)</button>
+  <button data-mode="shake">Shake (7)</button>
+  <button id="trailBtn" class="on">Trail (T)</button>
+  <button id="leaveBtn">Leave</button>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const canvas = $('#c');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+let ME = null;
+let mode = 'ripple';
+let trailOn = true;
+const members = new Map();  // uid -> { uid, name, color, x, y, tx, ty, trail, pts: [] }
+const fx = [];              // ripples, particles, speech bubbles, shakes
+let shakeUntil = 0;
+let local = { x: 0.5, y: 0.5 };
+let lastSent = 0;
+let sayAt = null;
+
+const PALETTE = ['#7c8cff', '#3ddc97', '#f5c04a', '#ff5d6c', '#4cc9f0', '#c77dff', '#ff9e5e', '#8ce99a'];
+function colorOf(uid) {
+  let h = 0;
+  for (const ch of String(uid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+}
+window.addEventListener('resize', resize);
+resize();
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return { status: r.status, data: await r.json().catch(() => ({ ok: false })) };
+}
+
+// ---------- Presence ----------
+function renderPresence() {
+  const box = $('#presence');
+  box.innerHTML = '';
+  members.forEach(m => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    const dot = document.createElement('i');
+    dot.style.background = m.color;
+    const name = document.createElement('span');
+    name.textContent = m.uid === ME.id ? 'You' : m.name;
+    chip.append(dot, name);
+    box.append(chip);
+  });
+  const others = members.size - 1;
+  $('#count').textContent = others > 0 ? (others + 1) + ' here' : 'Just you here';
+}
+
+function addMember(d) {
+  if (members.has(d.uid)) {
+    const m = members.get(d.uid);
+    m.name = d.name;
+    return;
+  }
+  members.set(d.uid, {
+    uid: d.uid, name: d.name, color: colorOf(d.uid),
+    x: d.x ?? 0.5, y: d.y ?? 0.5, tx: d.x ?? 0.5, ty: d.y ?? 0.5,
+    trail: d.trail !== false, pts: []
+  });
+  renderPresence();
+}
+
+// ---------- Effects ----------
+function spawn(kind, x, y, text, color) {
+  const now = performance.now();
+  const col = color || colorOf(ME.id);
+  if (kind === 'ripple') {
+    fx.push({ type: 'ripple', x, y, born: now, life: 900, color: col });
+  } else if (kind === 'sparkle') {
+    for (let i = 0; i < 22; i++) {
+      const a = Math.random() * Math.PI * 2, s = 0.25 + Math.random() * 0.45;
+      fx.push({ type: 'p', ch: '✦', x, y, vx: Math.cos(a) * s * 0.4, vy: Math.sin(a) * s * 0.4, g: 0.15,
+        born: now, life: 1200 + Math.random() * 500, color: col, size: 10 + Math.random() * 12 });
+    }
+  } else if (kind === 'heart') {
+    for (let i = 0; i < 12; i++) {
+      fx.push({ type: 'p', ch: '❤', x: x + (Math.random() - 0.5) * 0.03, y, vx: (Math.random() - 0.5) * 0.08, vy: -0.25 - Math.random() * 0.2, g: 0,
+        born: now + i * 60, life: 1800, color: ['#ff5d6c', '#ff8fa3', '#f48fb1'][i % 3], size: 16 + Math.random() * 10 });
+    }
+  } else if (kind === 'confetti') {
+    for (let i = 0; i < 60; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 0.4 + Math.random() * 0.7;
+      fx.push({ type: 'rect', x, y, vx: Math.cos(a) * s * 0.5, vy: Math.sin(a) * s * 0.5, g: 0.5,
+        born: now, life: 2200, color: PALETTE[i % PALETTE.length], w: 6 + Math.random() * 4, h: 10 + Math.random() * 6, rot: 0, vr: (Math.random() - 0.5) * 0.3 });
+    }
+  } else if (kind === 'rain') {
+    for (let i = 0; i < 70; i++) {
+      fx.push({ type: 'p', ch: ['★', '✦', '●', '❤'][i % 4], x: Math.random(), y: -0.05 - Math.random() * 0.2, vx: 0, vy: 0.35 + Math.random() * 0.4, g: 0,
+        born: now + Math.random() * 1500, life: 3500, color: PALETTE[i % PALETTE.length], size: 12 + Math.random() * 14 });
+    }
+  } else if (kind === 'say') {
+    fx.push({ type: 'say', x, y, born: now, life: 4500, text: text || '…', color: col });
+  } else if (kind === 'shake') {
+    shakeUntil = now + 600;
+  }
+}
+
+async function sendFx(kind, x, y, text) {
+  spawn(kind, x, y, text);
+  const d = await post('/mouse/fx', { kind, x, y, text }).catch(() => null);
+  if (d && d.status === 403) joinPage();
+}
+
+// ---------- Drawing ----------
+function drawCursor(m, isMe) {
+  const x = m.x * W, y = m.y * H;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = m.color;
+  ctx.shadowColor = 'rgba(0,0,0,.5)';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(0, 18); ctx.lineTo(4.5, 13.5); ctx.lineTo(8, 21); ctx.lineTo(11, 19.5); ctx.lineTo(7.5, 12.5); ctx.lineTo(13, 12.5); ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,.9)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  const label = isMe ? 'You' : m.name;
+  ctx.font = '600 12px Roboto, system-ui, sans-serif';
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = m.color;
+  ctx.beginPath();
+  ctx.roundRect(14, 14, tw + 14, 20, 10);
+  ctx.fill();
+  ctx.fillStyle = '#0b0d12';
+  ctx.fillText(label, 21, 28);
+  ctx.restore();
+}
+
+function drawTrail(m, now) {
+  const pts = m.pts;
+  while (pts.length && now - pts[0].t > 1400) pts.shift();
+  if (pts.length < 2) return;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const age = 1 - (now - b.t) / 1400;
+    ctx.strokeStyle = m.color;
+    ctx.globalAlpha = Math.max(0, age) * 0.7;
+    ctx.lineWidth = 2 + age * 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x * W, a.y * H);
+    ctx.lineTo(b.x * W, b.y * H);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  // Smooth remote cursors toward where they last were
+  members.forEach(m => {
+    if (m.uid === ME.id) return;
+    m.x += (m.tx - m.x) * 0.35;
+    m.y += (m.ty - m.y) * 0.35;
+  });
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  let sx = 0, sy = 0;
+  if (now < shakeUntil) {
+    const k = (shakeUntil - now) / 600 * 10;
+    sx = (Math.random() - 0.5) * k; sy = (Math.random() - 0.5) * k;
+  }
+  ctx.translate(sx, sy);
+
+  // Background
+  const bg = ctx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+  bg.addColorStop(0, '#12152a');
+  bg.addColorStop(1, '#07080d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+
+  // Trails
+  members.forEach(m => { if (m.trail) drawTrail(m, now); });
+
+  // Effects
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    const age = now - f.born;
+    if (age < 0) continue;
+    if (age > f.life) { fx.splice(i, 1); continue; }
+    const t = age / f.life;
+    if (f.type === 'ripple') {
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(f.x * W, f.y * H, 8 + t * 70, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (f.type === 'p') {
+      f.vx += 0; f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+      ctx.globalAlpha = Math.min(1, (1 - t) * 1.5);
+      ctx.fillStyle = f.color;
+      ctx.font = Math.round(f.size) + 'px Roboto, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.ch, f.x * W, f.y * H);
+      ctx.globalAlpha = 1;
+    } else if (f.type === 'rect') {
+      f.vy += f.g * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.vr;
+      ctx.globalAlpha = 1 - t * 0.6;
+      ctx.save();
+      ctx.translate(f.x * W, f.y * H);
+      ctx.rotate(f.rot);
+      ctx.fillStyle = f.color;
+      ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    } else if (f.type === 'say') {
+      const up = t * 20;
+      ctx.globalAlpha = t < 0.85 ? 1 : (1 - t) / 0.15;
+      ctx.font = '600 15px Roboto, system-ui, sans-serif';
+      const tw = ctx.measureText(f.text).width;
+      const bx = f.x * W - tw / 2 - 12, by = f.y * H - 52 - up;
+      ctx.fillStyle = 'rgba(15,17,23,.85)';
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, tw + 24, 32, 12);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#e7e9f0';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.text, bx + 12, by + 16);
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  // Cursors
+  members.forEach(m => drawCursor(m, m.uid === ME.id));
+
+  requestAnimationFrame(frame);
+}
+
+// ---------- Input ----------
+function norm(e) {
+  return { x: Math.min(1, Math.max(0, e.clientX / W)), y: Math.min(1, Math.max(0, e.clientY / H)) };
+}
+
+canvas.addEventListener('pointermove', e => {
+  if (!ME) return;
+  const p = norm(e);
+  local = p;
+  const me = members.get(ME.id);
+  if (me) {
+    me.x = p.x; me.y = p.y; me.tx = p.x; me.ty = p.y;
+    if (trailOn) me.pts.push({ x: p.x, y: p.y, t: performance.now() });
+  }
+  const nowT = performance.now();
+  if (nowT - lastSent > 60) {
+    lastSent = nowT;
+    post('/mouse/move', { x: p.x, y: p.y, trail: trailOn }).then(d => { if (d.status === 403) joinPage(); }).catch(() => {});
+  }
+});
+
+canvas.addEventListener('pointerdown', e => {
+  if (!ME) return;
+  const p = norm(e);
+  if (mode === 'say') {
+    sayAt = p;
+    const box = $('#sayBox');
+    box.hidden = false;
+    box.style.left = (e.clientX) + 'px';
+    box.style.top = (e.clientY) + 'px';
+    $('#sayInput').value = '';
+    setTimeout(() => $('#sayInput').focus(), 0);
+    return;
+  }
+  sendFx(mode, p.x, p.y, '');
+});
+
+$('#sayInput').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { $('#sayBox').hidden = true; return; }
+  if (e.key !== 'Enter') return;
+  const text = $('#sayInput').value.trim();
+  $('#sayBox').hidden = true;
+  if (text && sayAt) sendFx('say', sayAt.x, sayAt.y, text);
+});
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.bar button[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  const note = $('#note');
+  const names = { ripple: 'Click for ripples', sparkle: 'Click for sparkles', heart: 'Click for hearts', confetti: 'Click for confetti', rain: 'Click for a rain of stars', say: 'Click, then type a message', shake: 'Click to shake everyone\'s screen' };
+  note.textContent = names[m];
+  note.hidden = false;
+  note.style.opacity = 1;
+  clearTimeout(setMode.t);
+  setMode.t = setTimeout(() => { note.style.opacity = 0; }, 1800);
+}
+document.querySelectorAll('.bar button[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+const MODE_KEYS = ['ripple', 'sparkle', 'heart', 'confetti', 'rain', 'say', 'shake'];
+document.addEventListener('keydown', e => {
+  if (e.target.matches && e.target.matches('input, textarea')) return;
+  const n = Number(e.key);
+  if (n >= 1 && n <= 7) return setMode(MODE_KEYS[n - 1]);
+  if (e.key && e.key.toLowerCase() === 't') toggleTrail();
+});
+
+function toggleTrail() {
+  trailOn = !trailOn;
+  $('#trailBtn').classList.toggle('on', trailOn);
+}
+$('#trailBtn').addEventListener('click', toggleTrail);
+
+$('#leaveBtn').addEventListener('click', async () => {
+  await post('/mouse/leave', {}).catch(() => {});
+  location.href = '/';
+});
+
+// ---------- Live updates ----------
+const es = new EventSource('/notify');
+es.addEventListener('mouse', e => {
+  const d = JSON.parse(e.data);
+  if (d.type === 'join') {
+    if (d.uid !== ME.id) { addMember(d); }
+  } else if (d.type === 'leave') {
+    members.delete(d.uid);
+    renderPresence();
+  } else if (d.type === 'move') {
+    if (d.uid === ME.id) return;
+    const m = members.get(d.uid);
+    if (!m) { addMember({ uid: d.uid, name: d.name || 'Someone', x: d.x, y: d.y }); return; }
+    m.tx = d.x; m.ty = d.y;
+    m.trail = d.trail !== false;
+    if (m.trail) m.pts.push({ x: d.x, y: d.y, t: performance.now() });
+  } else if (d.type === 'fx') {
+    if (d.uid === ME.id) return;
+    const m = members.get(d.uid);
+    spawn(d.kind, d.x, d.y, d.text, m ? m.color : colorOf(d.uid));
+  }
+});
+
+// ---------- Join ----------
+async function joinPage() {
+  const d = await post('/mouse/join', { x: local.x, y: local.y, trail: trailOn }).catch(() => null);
+  if (!d || !d.data.ok) return;
+  d.data.members.forEach(m => { if (m.uid !== ME.id) addMember(m); });
+  renderPresence();
+}
+
+(async function init() {
+  let me;
+  try { me = await (await fetch('/api/me')).json(); } catch (e) { return; }
+  if (!me.user) { location.href = '/login?next=' + encodeURIComponent('/mouse'); return; }
+  ME = me.user;
+  members.set(ME.id, { uid: ME.id, name: ME.name, color: colorOf(ME.id), x: 0.5, y: 0.5, tx: 0.5, ty: 0.5, trail: true, pts: [] });
+  renderPresence();
+  await joinPage();
+  setInterval(joinPage, 8000);
+  setTimeout(() => { $('#hint').style.opacity = 0; }, 4000);
+  requestAnimationFrame(frame);
+})();
+
+window.addEventListener('pagehide', () => {
+  if (ME && navigator.sendBeacon) {
+    navigator.sendBeacon('/mouse/leave', new Blob(['{}'], { type: 'application/json' }));
+  }
+});
+</script>
+</body>
+</html>
