@@ -2,121 +2,777 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LocalChat · Sign in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Verify it's you</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{min-height:100%;background:#0b0d12;color:#e7e9f0;font-family:"Google Sans",Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
-body{display:flex;align-items:center;justify-content:center;padding:20px}
-.card{width:min(380px,100%);background:#0f1117;border:1px solid #232734;border-radius:18px;padding:28px 26px;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:popIn .35s cubic-bezier(.16,1,.3,1)}
-@keyframes popIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:16px;margin-bottom:18px}
-.logo{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#7c8cff,#3ddc97)}
-.tabs{display:flex;gap:6px;background:#131722;border-radius:14px;padding:4px;margin-bottom:18px}
-.tab{flex:1;height:34px;border-radius:10px;border:0;background:transparent;color:#8a93a8;font:inherit;font-size:13px;cursor:pointer;transition:background .2s,color .2s}
-.tab.active{background:#1c2130;color:#e7e9f0}
-form{display:flex;flex-direction:column;gap:12px}
-label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#8a93a8}
-input{height:42px;border-radius:12px;border:1px solid #2a3040;background:#0c0f16;color:#e7e9f0;padding:0 14px;font:inherit;font-size:14px;outline:none;transition:border-color .2s}
-input:focus{border-color:#7c8cff}
-.name-field[hidden]{display:none}
-button.submit{height:44px;margin-top:6px;border-radius:22px;border:0;background:linear-gradient(135deg,#7c8cff,#5a6df0);color:#fff;font:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:transform .12s}
-button.submit:hover{filter:brightness(1.08)}
-button.submit:active{transform:scale(.97)}
-button.submit:disabled{opacity:.6;cursor:default}
-.error{margin-bottom:12px;padding:9px 12px;border-radius:10px;background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.35);color:#ff9aa4;font-size:13px;line-height:1.4}
-.error[hidden]{display:none}
-.note{margin-top:16px;font-size:12px;color:#6b7389;line-height:1.5}
-[hidden]{display:none !important}
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  :root {
+    --blue: #1a73e8;
+    --text: #202124;
+    --muted: #5f6368;
+    --card: #e3e3e3;
+    --g: min(74vw, 40vh);
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: #fff;
+    font-family: Roboto, "Segoe UI", Arial, sans-serif;
+    color: var(--text);
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  .phone-frame {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    background: #fff;
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    container-type: size;
+  }
+
+  .screen-view {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    background: #fff;
+  }
+  .screen-view.active { display: flex; }
+
+  /* ---------- Fullscreen button ---------- */
+  .fs-btn {
+    position: absolute;
+    top: calc(1.6cqh + env(safe-area-inset-top, 0px));
+    right: 4cqw;
+    z-index: 20;
+    width: 11cqw;
+    height: 11cqw;
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 48px;
+    max-height: 48px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(32, 33, 36, .08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .fs-btn:active { background: rgba(32, 33, 36, .18); }
+  .fs-btn svg { width: 55%; height: 55%; stroke: #202124; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .fs-btn.hidden { display: none; }
+
+  /* ---------- Verification screen ---------- */
+  .band {
+    height: max(7.4cqh, 36px);
+    background: linear-gradient(90deg, #4a86de 0%, #4a84dc 40%, #3a6fcb 66%, #3567c4 100%);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .band::before, .band::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.05);
+    transform: skewX(-20deg);
+  }
+  .band::before { left: 11%; width: 18%; }
+  .band::after  { left: 66%; width: 12%; background: rgba(0, 0, 0, 0.05); }
+
+  .content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 4cqw 3cqh;
+  }
+
+  .logo {
+    margin-top: 8.5cqh;
+    font-size: 11cqw;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .logo .b { color: #4285f4; }
+  .logo .r { color: #ea4335; }
+  .logo .y { color: #fbbc05; }
+  .logo .g { color: #34a853; }
+
+  h1 {
+    margin-top: 4.5cqh;
+    font-weight: 400;
+    font-size: 7.6cqw;
+    line-height: 1.15;
+    text-align: center;
+  }
+
+  .sub {
+    margin-top: 2.6cqh;
+    font-size: 4.6cqw;
+    line-height: 1.35;
+    text-align: center;
+  }
+  .account {
+    margin-top: 1cqh;
+    font-size: 4.3cqw;
+    color: var(--muted);
+  }
+
+  .device {
+    margin-top: 4.5cqh;
+    width: 89%;
+    min-height: 20cqw;
+    padding: 2.4cqh 6cqw;
+    background: var(--card);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5cqw;
+    position: relative;
+  }
+  .phone-icon {
+    width: 3.6cqw;
+    height: 7.4cqw;
+    min-width: 16px;
+    min-height: 30px;
+    border: 2px solid #333;
+    border-radius: 4px;
+    background: linear-gradient(180deg, #6d3fd0 0%, #8c5fe0 40%, #e0b48e 75%, #c08a5e 100%);
+    flex-shrink: 0;
+  }
+  .device-info { flex: 1; }
+  .device-name { font-size: 5.2cqw; color: var(--text); }
+  .device-meta { margin-top: 0.8cqh; font-size: 4cqw; color: var(--muted); line-height: 1.35; }
+  .device::after {
+    content: "";
+    position: absolute;
+    right: 6cqw;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left: 2.4cqw solid transparent;
+    border-right: 2.4cqw solid transparent;
+    border-top: 2.4cqw solid #5f6368;
+  }
+
+  .pattern-wrap {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pattern {
+    position: relative;
+    width: var(--g);
+    height: var(--g);
+    touch-action: none;
+  }
+
+  .dot {
+    position: absolute;
+    width: max(8px, calc(var(--g) * 0.06));
+    height: max(8px, calc(var(--g) * 0.06));
+    border-radius: 50%;
+    background: var(--blue);
+    transform: translate(-50%, -50%) scale(1);
+    transition: transform .2s ease, box-shadow .25s ease;
+    pointer-events: none;
+  }
+  .dot.on {
+    transform: translate(-50%, -50%) scale(1.35);
+    box-shadow: 0 0 0 calc(var(--g) * 0.035) rgba(26, 115, 232, .18);
+  }
+
+  .lines {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .lines polyline {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .lines .live { opacity: .75; }
+
+  .status {
+    min-height: 6cqh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2.4cqw;
+    font-size: 4.2cqw;
+    color: var(--muted);
+    text-align: center;
+    padding: 0 6cqw;
+  }
+  .spinner {
+    width: 4.2cqw;
+    height: 4.2cqw;
+    min-width: 16px;
+    min-height: 16px;
+    border: 2px solid #d0d0d0;
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    display: none;
+    flex-shrink: 0;
+  }
+  .spinner.show { display: block; }
+
+  .actions {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .btn-text {
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 4.6cqw;
+    color: var(--blue);
+    padding: 1.5cqh 1cqw;
+    cursor: pointer;
+  }
+  .btn-text:disabled { opacity: .35; cursor: default; }
+
+  .btn-primary {
+    font: inherit;
+    font-size: 4.6cqw;
+    color: #fff;
+    background: var(--blue);
+    border: 0;
+    border-radius: 4px;
+    min-width: 20cqw;
+    height: 5.6cqh;
+    padding: 0 6cqw;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+  }
+  .btn-primary:disabled { opacity: .45; cursor: default; }
+
+  /* ---------- Ednia-style app screen ---------- */
+  .app-view {
+    font-family: "Plus Jakarta Sans", "Helvetica Neue", Roboto, Arial, sans-serif;
+  }
+
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4cqh 6cqw 0;
+    flex-shrink: 0;
+  }
+  .ednia {
+    display: flex;
+    align-items: center;
+    gap: 1.4cqw;
+    font-size: 8.4cqw;
+    font-weight: 700;
+    color: #1f5bff;
+    letter-spacing: -0.02em;
+    cursor: pointer;
+  }
+  .menu-icon { width: 7cqw; height: 6cqw; }
+
+  .app-search {
+    margin: 2.6cqh 6cqw 0;
+    height: 6.4cqh;
+    min-height: 40px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    display: flex;
+    align-items: center;
+    gap: 3cqw;
+    padding: 0 5cqw;
+    color: #9aa0a6;
+    font-size: 4.4cqw;
+    flex-shrink: 0;
+  }
+
+  .cats {
+    display: flex;
+    gap: 5cqw;
+    padding: 2.6cqh 6cqw 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid #ececec;
+    flex-shrink: 0;
+  }
+  .cats::-webkit-scrollbar { display: none; }
+  .cat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8cqh;
+    padding-bottom: 1.4cqh;
+    font-size: 3.9cqw;
+    color: #6b7280;
+    white-space: nowrap;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .cat svg { width: 6.4cqw; height: 6.4cqw; stroke: #6b7280; fill: none; stroke-width: 1.5; }
+  .cat.active { color: #111; font-weight: 600; }
+  .cat.active svg { stroke: #111; }
+  .cat.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: #111;
+  }
+
+  .feed {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 2.4cqh 6cqw 14cqh;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .feed::-webkit-scrollbar { display: none; }
+
+  .card-img {
+    width: 100%;
+    height: 34cqh;
+    border-radius: 3.4cqw;
+    overflow: hidden;
+    position: relative;
+    background: #ddd;
+  }
+  .card-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    pointer-events: none;
+  }
+  .school-badge {
+    position: absolute;
+    left: 6cqw;
+    bottom: 3cqw;
+    width: 20cqw;
+    height: 20cqw;
+    background: #fff;
+    border-radius: 2.4cqw;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2cqw;
+    font-weight: 700;
+    color: #1d3f8a;
+    text-align: center;
+    line-height: 1.1;
+  }
+
+  .card-title {
+    margin-top: 1.8cqh;
+    font-size: 5.6cqw;
+    font-weight: 600;
+    color: #1f1f1f;
+  }
+  .card-school { margin-top: 0.8cqh; font-size: 4.2cqw; color: #6b7280; }
+  .card-tags { margin-top: 0.8cqh; font-size: 4.2cqw; }
+  .tag-nat { color: #2e7d32; }
+  .tag-eco { color: #3b1f8c; }
+  .card-merit { margin-top: 1cqh; font-size: 4.8cqw; color: #1f1f1f; }
+  .card-merit small { font-size: 3.8cqw; color: #444; }
+  .card-years { margin-top: 1cqh; font-size: 4.2cqw; color: #6b7280; }
+  .card-grade { margin-top: 1cqh; font-size: 4.8cqw; color: #1f1f1f; }
+  .card-grade small { font-size: 3.8cqw; color: #444; }
+
+  .card + .card { margin-top: 4.6cqh; }
+
+  .filter-pill {
+    position: absolute;
+    left: 50%;
+    bottom: calc(3.4cqh + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    height: 6.4cqh;
+    min-height: 38px;
+    padding: 0 6cqw;
+    border-radius: 999px;
+    background: #1b1b1b;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 2.6cqw;
+    font-size: 4.6cqw;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    white-space: nowrap;
+  }
+  .filter-pill svg { width: 5cqw; height: 5cqw; stroke: #fff; fill: none; stroke-width: 1.6; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="brand"><span class="logo"></span>LocalChat</div>
-  <div class="tabs">
-    <button class="tab active" id="tabIn" type="button">Sign in</button>
-    <button class="tab" id="tabUp" type="button">Create account</button>
+
+<div class="phone-frame">
+
+  <!-- Fullscreen button -->
+  <button class="fs-btn" id="fsBtn" aria-label="Enter fullscreen" title="Fullscreen">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 9 V4 H9 M15 4 H20 V9 M20 15 V20 H15 M9 20 H4 V15"/>
+    </svg>
+  </button>
+
+  <!-- Verification screen -->
+  <div class="screen-view active" id="verifyScreen">
+    <div class="band" aria-hidden="true"></div>
+
+    <main class="content">
+      <div class="logo" aria-label="Google">
+        <span class="b">G</span><span class="r">o</span><span class="y">o</span><span class="b">g</span><span class="g">l</span><span class="r">e</span>
+      </div>
+
+      <h1>Verify it’s you</h1>
+
+      <p class="sub">To access your encrypted data, draw your pattern</p>
+      <p class="account">koo*****st@gmail.com</p>
+
+      <div class="device" role="group" aria-label="Selected device">
+        <div class="phone-icon" aria-hidden="true"></div>
+        <div class="device-info">
+          <div class="device-name">Galaxy A14</div>
+          <div class="device-meta">Last used 2 minutes ago</div>
+        </div>
+      </div>
+
+      <div class="pattern-wrap">
+        <div class="pattern" id="pattern" aria-label="Pattern grid">
+          <svg class="lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <polyline id="path" points=""></polyline>
+            <polyline id="live" class="live" points=""></polyline>
+          </svg>
+        </div>
+      </div>
+
+      <div class="status">
+        <div class="spinner" id="spinner"></div>
+        <span id="message"></span>
+      </div>
+
+      <div class="actions">
+        <button class="btn-text" id="clearBtn">Clear</button>
+        <button class="btn-primary" id="nextBtn" disabled>Next</button>
+      </div>
+    </main>
   </div>
-  <div class="error" id="error" hidden></div>
-  <form id="form">
-    <label>Email
-      <input id="email" type="email" autocomplete="email" required>
-    </label>
-    <label>Password
-      <input id="password" type="password" autocomplete="current-password" minlength="8" required>
-    </label>
-    <label class="name-field" id="nameField" hidden>Name shown in chats
-      <input id="name" maxlength="24" autocomplete="nickname">
-    </label>
-    <label class="policy-field" id="policyField" hidden style="flex-direction:row;align-items:center;gap:8px;color:#c4c9d8">
-      <input id="policy" type="checkbox" style="height:auto;width:auto">
-      <span>I agree to the Camera Access <a href="#" id="policyLink" style="color:#9ab0ff">Policy</a>.</span>
-    </label>
-    <button class="submit" id="submit" type="submit">Sign in</button>
-  </form>
-  <p class="note" id="hint">Your name stays with your account, so you don't need to enter it again.</p>
+
+  <!-- Ednia-style page -->
+  <div class="screen-view app-view" id="appScreen">
+    <header class="app-header">
+      <div class="ednia" id="backToPattern" title="Back">
+        <svg width="8cqw" height="8cqw" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 15 Q9 11 13 7 L13 3 L20 10 L16 10 Q12 14 6 19 Z" fill="#1f5bff"/>
+        </svg>
+        ednia
+      </div>
+      <svg class="menu-icon" viewBox="0 0 28 24" aria-hidden="true">
+        <path d="M2 4 H26 M2 12 H26 M2 20 H26" stroke="#222" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+    </header>
+
+    <div class="app-search">
+      <svg width="5.4cqw" height="5.4cqw" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20 L16.5 16.5"/>
+      </svg>
+      <span>Sök på gymnasier</span>
+    </div>
+
+    <nav class="cats">
+      <div class="cat active">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="1.5"/><path d="M6 8 V5 H18 V8 M8 5 H16"/></svg>
+        Alla program
+      </div>
+      <div class="cat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 V10 L5 19 H19 L15 10 V3 M8 3 H16"/><path d="M7 15 H17"/></svg>
+        Natur
+      </div>
+      <div class="cat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7 V4 H15 V7 M3 12 H21"/></svg>
+        Ekonomi
+      </div>
+      <div class="cat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9 L12 4 L21 9 M5 10 V18 M9 10 V18 M15 10 V18 M19 10 V18 M3 20 H21"/></svg>
+        Samhälle
+      </div>
+      <div class="cat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M5 5 L7 7 M17 17 L19 19 M5 19 L7 17 M17 7 L19 5"/></svg>
+        Teknik
+      </div>
+    </nav>
+
+    <div class="feed">
+      <div class="card">
+        <div class="card-img">
+          <img src="https://cdn.ednia.se/image-uploads/prod/1i58nik4o-zScMxDQP.jpeg" alt="P A Fogelströms gymnasium - Öppet hus &amp; antagningspoäng"/>
+        </div>
+        <div class="card-title">P A Fogelströms gymnasium</div>
+        <div class="card-school">Södermalm</div>
+        <div class="card-tags"><span class="tag-nat">Natur</span> <span style="color:#999">·</span> <span class="tag-eco">Ekonomi</span></div>
+        <div class="card-merit">302.5 – 322.5 <small>merit</small></div>
+      </div>
+
+      <div class="card">
+        <div class="card-img">
+          <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSpoMjhzVo17BskR_MlSuYyU9FKN8vamjO2RD4KGyKSxw&amp;s=10" alt="Hitta till oss"/>
+          <div class="school-badge">STOCKHOLMS<br>UNIVERSITET</div>
+        </div>
+        <div class="card-title">Juristprogrammet</div>
+        <div class="card-school">Stockholms universitet</div>
+        <div class="card-years">4.5 år</div>
+        <div class="card-grade">20.50 <small>gymnasiebetyg</small></div>
+      </div>
+    </div>
+
+    <div class="filter-pill">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7 H13 M17 7 H21 M3 17 H7 M11 17 H21"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+      Filtrera
+    </div>
+  </div>
+
 </div>
 
 <script>
-const params = new URLSearchParams(location.search);
-let next = params.get('next') || '/';
-if (!next.startsWith('/') || next.startsWith('//')) next = '/';
+(() => {
+  // ---------- Config ----------
+  const CHECK_MS = 1400;
+  const HIT_RADIUS = 14;
+  const POS = [100 / 6, 50, 500 / 6];
 
-let mode = 'in';
-const $ = s => document.querySelector(s);
+  // ---------- Elements ----------
+  const pattern    = document.getElementById('pattern');
+  const pathLine   = document.getElementById('path');
+  const liveLine   = document.getElementById('live');
+  const message    = document.getElementById('message');
+  const spinner    = document.getElementById('spinner');
+  const clearBtn   = document.getElementById('clearBtn');
+  const nextBtn    = document.getElementById('nextBtn');
+  const verifyView = document.getElementById('verifyScreen');
+  const appView    = document.getElementById('appScreen');
+  const backBtn    = document.getElementById('backToPattern');
+  const fsBtn      = document.getElementById('fsBtn');
 
-function setMode(m) {
-  mode = m;
-  $('#tabIn').classList.toggle('active', m === 'in');
-  $('#tabUp').classList.toggle('active', m === 'up');
-  $('#nameField').hidden = m !== 'up';
-  $('#policyField').hidden = m !== 'up';
-  $('#name').required = m === 'up';
-  $('#password').autocomplete = m === 'up' ? 'new-password' : 'current-password';
-  $('#submit').textContent = m === 'up' ? 'Create account' : 'Sign in';
-  $('#hint').textContent = m === 'up'
-    ? 'Choose a name that other people will see. It stays with your account.'
-    : 'Sign in to chat and join video calls.';
-  showError('');
-}
+  // ---------- Fullscreen ----------
+  const root = document.documentElement;
 
-function showError(msg) {
-  const e = $('#error');
-  e.textContent = msg;
-  e.hidden = !msg;
-}
-
-$('#tabIn').addEventListener('click', () => setMode('in'));
-$('#tabUp').addEventListener('click', () => setMode('up'));
-
-$('#form').addEventListener('submit', async e => {
-  e.preventDefault();
-  showError('');
-  const btn = $('#submit');
-  btn.disabled = true;
-  const body = { email: $('#email').value, password: $('#password').value };
-  if (mode === 'up') {
-    if (!$('#policy').checked) { showError('You must agree to the Camera Access Policy to create an account.'); btn.disabled = false; return; }
-    body.name = $('#name').value; body.policy = true;
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
   }
-  try {
-    const r = await fetch(mode === 'up' ? '/api/signup' : '/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const d = await r.json().catch(() => ({ ok: false, error: 'Unexpected response from the server.' }));
-    if (!d.ok) throw new Error(d.error || 'Something went wrong.');
-    location.href = next;
-  } catch (err) {
-    showError(err instanceof TypeError ? 'Could not reach the server. Check your connection.' : err.message);
-    btn.disabled = false;
-  }
-});
 
-$('#policyLink').addEventListener('click', e => { e.preventDefault(); window.CamPolicy.show(false); });
-setMode('up');
+  function enterFullscreen() {
+    const req = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (req) req.call(root, { navigationUI: 'hide' }).catch(() => {});
+  }
+
+  function updateFsButton() {
+    fsBtn.classList.toggle('hidden', isFullscreen());
+  }
+
+  fsBtn.addEventListener('click', enterFullscreen);
+  document.addEventListener('fullscreenchange', updateFsButton);
+  document.addEventListener('webkitfullscreenchange', updateFsButton);
+
+  // ---------- Build dots ----------
+  const dots = [];
+  for (let i = 0; i < 9; i++) {
+    const cx = POS[i % 3];
+    const cy = POS[Math.floor(i / 3)];
+    const el = document.createElement('div');
+    el.className = 'dot';
+    el.style.left = cx + '%';
+    el.style.top = cy + '%';
+    pattern.insertBefore(el, pattern.firstChild);
+    dots.push({ el, x: cx, y: cy });
+  }
+
+  // ---------- State ----------
+  // phase: idle | drawing | ready | checking
+  let phase = 'idle';
+  let path = [];
+  let drawing = false;
+  let pointer = null;
+  let timers = [];
+
+  // ---------- Helpers ----------
+  function setMessage(text) {
+    message.textContent = text;
+  }
+  function clearTimers() {
+    timers.forEach(t => { clearTimeout(t); clearInterval(t); });
+    timers = [];
+  }
+  function later(fn, ms) {
+    timers.push(setTimeout(fn, ms));
+  }
+
+  function render() {
+    dots.forEach((d, i) => d.el.classList.toggle('on', path.includes(i)));
+
+    pathLine.setAttribute('points',
+      path.map(i => `${dots[i].x},${dots[i].y}`).join(' '));
+
+    if (drawing && pointer && path.length) {
+      const last = dots[path[path.length - 1]];
+      liveLine.setAttribute('points', `${last.x},${last.y} ${pointer.x},${pointer.y}`);
+    } else {
+      liveLine.setAttribute('points', '');
+    }
+
+    nextBtn.disabled = phase !== 'ready';
+    clearBtn.disabled = phase === 'checking';
+  }
+
+  function resetPattern() {
+    path = [];
+    drawing = false;
+    pointer = null;
+    phase = 'idle';
+    spinner.classList.remove('show');
+    setMessage('');
+    render();
+  }
+
+  function toLocal(e) {
+    const r = pattern.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) / r.width * 100,
+      y: (e.clientY - r.top) / r.height * 100
+    };
+  }
+
+  function tryAddDot(p) {
+    for (let i = 0; i < dots.length; i++) {
+      if (path.includes(i)) continue;
+      const d = dots[i];
+      if (Math.hypot(p.x - d.x, p.y - d.y) < HIT_RADIUS) {
+        path.push(i);
+      }
+    }
+  }
+
+  // ---------- Pointer input ----------
+  pattern.addEventListener('pointerdown', (e) => {
+    if (phase === 'checking') return;
+    if (phase === 'ready') path = [];
+
+    phase = 'drawing';
+    drawing = true;
+    pattern.setPointerCapture(e.pointerId);
+    pointer = toLocal(e);
+    tryAddDot(pointer);
+    render();
+  });
+
+  pattern.addEventListener('pointermove', (e) => {
+    if (!drawing) return;
+    pointer = toLocal(e);
+    tryAddDot(pointer);
+    render();
+  });
+
+  function endStroke() {
+    if (!drawing) return;
+    drawing = false;
+    pointer = null;
+    phase = path.length ? 'ready' : 'idle';
+    render();
+  }
+
+  pattern.addEventListener('pointerup', endStroke);
+  pattern.addEventListener('pointercancel', endStroke);
+  pattern.addEventListener('lostpointercapture', endStroke);
+
+  // Block page scroll, pull-to-refresh and pinch-zoom
+  document.addEventListener('touchmove', (e) => {
+    if (e.target.closest && e.target.closest('#pattern')) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---------- Buttons ----------
+  clearBtn.addEventListener('click', () => {
+    clearTimers();
+    resetPattern();
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (phase !== 'ready') return;
+    startCheck();
+  });
+
+  // ---------- Fake check, then switch instantly to the app page ----------
+  function startCheck() {
+    phase = 'checking';
+    nextBtn.disabled = true;
+    spinner.classList.add('show');
+    setMessage('Checking…');
+    render();
+
+    later(showApp, CHECK_MS);
+  }
+
+  function showApp() {
+    spinner.classList.remove('show');
+    setMessage('');
+    verifyView.classList.remove('active');
+    appView.classList.add('active');
+  }
+
+  // Tapping the ednia logo returns instantly to the pattern screen
+  backBtn.addEventListener('click', () => {
+    clearTimers();
+    appView.classList.remove('active');
+    verifyView.classList.add('active');
+    resetPattern();
+  });
+
+  // ---------- Init ----------
+  updateFsButton();
+  render();
+})();
 </script>
-<script src="/cmd.js" defer></script>
 </body>
 </html>
