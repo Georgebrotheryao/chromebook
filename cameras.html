@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Gallery</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#1a1a1a;color:#e6e6e6;font-family:"Segoe UI",system-ui,sans-serif;font-size:14px}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;background:#2b2b2b;border-bottom:1px solid #444}
+header h1{font-size:15px;font-weight:600;margin-right:auto}
+a.back{color:#9ec1ff;text-decoration:none}
+button{background:#3a3a3a;color:#fff;border:1px solid #555;padding:6px 12px;cursor:pointer;font:inherit}button:hover{background:#4a4a4a}
+.sw{display:flex;align-items:center;gap:6px}
+#picker{position:absolute;right:12px;top:46px;z-index:10;background:#2b2b2b;border:1px solid #555;min-width:200px;display:none}
+#picker button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #3a3a3a}#picker p{padding:8px 12px;color:#aaa}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;padding:10px;align-items:start}
+.tile{background:#000;border:1px solid #555;resize:both;overflow:hidden;min-width:220px;min-height:180px;height:300px;max-width:100%;display:flex;flex-direction:column}
+.tile .bar{display:flex;align-items:center;gap:8px;background:#2b2b2b;padding:4px 8px;font-size:12px}
+.tile .bar b{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .bar button{padding:2px 8px}.tile .bar button.x:hover{background:#e81123}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:4px}.on .dot{background:#3ddc97}.off .dot{background:#e05a5a}
+.tile video{flex:1;min-height:0;width:100%;background:#000;object-fit:contain}
+.st{padding:3px 8px;font-size:11px;color:#bbb;background:#222}
+.empty{padding:40px 16px;color:#999;text-align:center;grid-column:1/-1}
+</style>
+</head>
+<body>
+<header>
+  <a class="back" href="/">← Back</a>
+  <h1>Camera Gallery</h1>
+  <label class="sw"><input type="checkbox" id="share"> Share my camera</label>
+  <button id="policy">Policy</button>
+  <button id="add">+ Open another camera</button>
+</header>
+<div id="picker"></div>
+<div id="grid"><div class="empty" id="empty">No cameras open. Use “Open another camera” or type <code>/camera name on</code> (press / ).</div></div>
+<script src="/cmd.js"></script>
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var tiles = {}, pcs = {}, pend = {}, cfg = { iceServers: [] };
+  var api = function (p, b) { return window.CamApi ? window.CamApi(p, b) : Promise.resolve({ ok: false }); };
+
+  function setStatus(sid, text) { if (tiles[sid]) tiles[sid].querySelector('.st').textContent = text; }
+  function empty() { $('#empty').style.display = Object.keys(tiles).length ? 'none' : ''; }
+
+  function tile(s) {
+    if (tiles[s.sid]) return tiles[s.sid];
+    var t = document.createElement('div'); t.className = 'tile ' + (s.ownerOnline ? 'on' : 'off');
+    t.innerHTML = '<div class="bar"><b><span class="dot"></span><span class="nm"></span></b><span class="os"></span><button class="fs" title="Fullscreen">⛶</button><button class="x" title="Close">✕</button></div><video autoplay playsinline muted></video><div class="st">Waiting for permission…</div>';
+    t.querySelector('.nm').textContent = s.ownerName;
+    t.querySelector('.os').textContent = s.ownerOnline ? 'online' : 'offline';
+    t.querySelector('.x').onclick = function () { api('/api/camera/close', { sid: s.sid }); removeTile(s.sid); };
+    t.querySelector('.fs').onclick = function () { var v = t.querySelector('video'); (v.requestFullscreen || v.webkitRequestFullscreen || function () {}).call(v); };
+    $('#grid').appendChild(t); tiles[s.sid] = t; empty(); return t;
+  }
+  function removeTile(sid) {
+    if (pcs[sid]) { try { pcs[sid].close(); } catch (e) {} delete pcs[sid]; }
+    if (tiles[sid]) { tiles[sid].remove(); delete tiles[sid]; }
+    delete pend[sid]; empty();
+  }
+  function connect(sid) {
+    if (pcs[sid]) { try { pcs[sid].close(); } catch (e) {} }
+    var pc = new RTCPeerConnection({ iceServers: cfg.iceServers });
+    pcs[sid] = pc; pend[sid] = [];
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.ontrack = function (e) { var v = tiles[sid] && tiles[sid].querySelector('video'); if (v) { v.srcObject = e.streams[0] || new MediaStream([e.track]); v.play().catch(function () {}); } };
+    pc.onicecandidate = function (e) { if (e.candidate) api('/api/camera/signal', { sid: sid, kind: 'ice', data: e.candidate }); };
+    pc.onconnectionstatechange = function () {
+      var m = { connecting: 'Connecting…', connected: 'Live', disconnected: 'Connection lost', failed: 'Connection failed', closed: 'Closed' }[pc.connectionState];
+      if (m) setStatus(sid, m);
+    };
+    setStatus(sid, 'Connecting…');
+    pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).then(function () { return api('/api/camera/signal', { sid: sid, kind: 'offer', data: pc.localDescription }); });
+  }
+  function sync(list) {
+    var seen = {};
+    list.forEach(function (s) { seen[s.sid] = 1; var t = tile(s); t.className = 'tile ' + (s.ownerOnline ? 'on' : 'off'); t.querySelector('.os').textContent = s.ownerOnline ? 'online' : 'offline'; if (s.state === 'ready' && !pcs[s.sid]) connect(s.sid); });
+    Object.keys(tiles).forEach(function (k) { if (!seen[k]) removeTile(k); });
+  }
+  function refresh() { return api('/api/camera/mine').then(function (d) { if (d.ok) sync(d.sessions); }); }
+
+  function picker() {
+    var p = $('#picker');
+    if (p.style.display === 'block') { p.style.display = 'none'; return; }
+    api('/api/camera/available').then(function (d) {
+      p.innerHTML = '';
+      var list = (d.cameras || []).filter(function (c) { return !c.open; });
+      if (!list.length) { p.innerHTML = '<p>No other cameras available.</p>'; }
+      list.forEach(function (c) { var b = document.createElement('button'); b.textContent = c.name; b.onclick = function () { p.style.display = 'none'; api('/api/camera/open', { id: c.id }).then(function (r) { if (!r.ok) alert(r.error); refresh(); }); }; p.appendChild(b); });
+      p.style.display = 'block';
+    });
+  }
+  $('#add').onclick = picker;
+  $('#policy').onclick = function () { window.CamPolicy.show(false); };
+  $('#share').onchange = function () {
+    var box = this;
+    window.CamSetSharing(box.checked).then(function (m) { alert(m); api('/api/me').then(function (d) { box.checked = !!d.camShare; }); });
+  };
+
+  var tries = 0;
+  (function init() {
+    if (!window.CamBus) { if (tries++ < 50) return setTimeout(init, 100); return; }
+    api('/api/camera/config').then(function (c) { if (c.ok) cfg = c; });
+    api('/api/me').then(function (d) { $('#share').checked = !!d.camShare; });
+    CamBus.on('hello', refresh);
+    CamBus.on('camready', function (d) { refresh(); });
+    CamBus.on('camsignal', function (d) {
+      var pc = pcs[d.sid]; if (!pc) return;
+      if (d.kind === 'answer') pc.setRemoteDescription(d.data).then(function () { (pend[d.sid] || []).forEach(function (c) { pc.addIceCandidate(c).catch(function () {}); }); pend[d.sid] = null; });
+      else if (d.kind === 'ice') { if (pc.remoteDescription) pc.addIceCandidate(d.data).catch(function () {}); else if (pend[d.sid]) pend[d.sid].push(d.data); }
+    });
+    CamBus.on('camclosed', function (d) { removeTile(d.sid); });
+    CamBus.on('camavail', refresh);
+    CamBus.on('rename', refresh);
+    refresh();
+  })();
+})();
+</script>
+</body>
+</html>
